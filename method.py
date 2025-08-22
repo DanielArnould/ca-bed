@@ -1,5 +1,13 @@
-from twenty_questions import prompts
-from node import UoTNode
+"""
+This module orchestrates the different methods of conversation employed
+by enhanced UoT. It should handle the expansion and creation of the tree,
+getting and processing the examiner response and the guesser response
+
+**IMPORTANT**: As much info as possible should be saved with every run. This includes:
+- Conversation history
+- Tree state.
+"""
+
 from chat_utils import ask_llm
 
 """

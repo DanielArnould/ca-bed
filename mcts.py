@@ -1,3 +1,12 @@
+"""
+##################################################
+#                   DEPRECATED                   #
+##################################################
+
+Only remains here as reference for designing the reward functions
+for now
+"""
+
 from dataclasses import dataclass
 from itertools import chain
 import math

@@ -1,7 +1,12 @@
+"""
+This module should work on unifying all prompt calls from different tasks
+into one interface.
+"""
+
 from dataclasses import dataclass, field
 import re
 
-from twenty_questions.prompts import create_questions_prompt
+# from prompts import create_questions_prompt
 
 """
 TODO: Create chat utilities to get LLM responses for multiple different
@@ -27,7 +32,7 @@ def create_questions(
     if len(items) <= 1:
         return []
 
-    message = create_questions_prompt(items, previous_questions, n)
+    # message = create_questions_prompt(items, previous_questions, n)
     response = ask_llm(message)
 
     questions = []

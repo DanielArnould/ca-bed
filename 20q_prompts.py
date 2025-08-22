@@ -1,3 +1,12 @@
+"""
+##################################################
+#                   DEPRECATED                   #
+##################################################
+
+Only remains here as reference for future prompt functions
+"""
+
+
 def create_questions_prompt(
     items: list[str], previous_questions: list[str], n: int
 ) -> str:
