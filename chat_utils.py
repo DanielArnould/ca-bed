@@ -1,6 +1,10 @@
 """
 This module should work on unifying all prompt calls from different tasks
 into one interface.
+
+=========================================================================
+                            DEPRECATED
+=========================================================================
 """
 
 from dataclasses import dataclass, field
