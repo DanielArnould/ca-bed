@@ -1,1 +1,69 @@
-X = 3
+from textwrap import dedent
+
+# For context (I'm getting these mixed-up):
+# Questioner -> Guesser
+# Answerer -> Examiner 
+
+def get_questioner_prologue(hypothesis_space: list[str]) -> str:
+    bullets = "\n".join(f"- {h}" for h in hypothesis_space)
+    return dedent("""
+        You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X. X is possibly one of the following:
+        {hypothesis}
+        You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
+        Let us begin. Ask me the first question.
+    """).format(hypothesis=bullets).strip()
+
+def get_answerer_prologue(ground_truth: str) -> str:
+    return dedent("""
+        You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
+        I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'. Note that you must never reveal X, until I guess it correctly.
+        If I guess X correctly in my question, directly respond 'You guessed it. X is {target_item}.' instead of saying 'Yes'.
+        Let us begin. Here is my first question.
+    """).format(target_item=ground_truth).strip()
+
+def get_question_generation_prompt(m: int, history: list[tuple[str, str]], belief_state: list[tuple[str, int]]) -> str:
+    bullets_history = "\n".join(f"- Q: {h[0]}; A: {h[1]}" for h in history)
+    bullets_belief = "\n".join(f"- X: {b[0]}; Probability: {b[1]}" for b in belief_state)
+
+    return dedent("""
+        The game has proceeded as follows:
+        {history}
+
+        Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
+        {belief}
+
+        Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+        Format your response in this structure:
+        1. <Question 1>
+        2. <Question 2>
+        ...
+        {num_questions}. <Question {num_questions}>
+    """).format(history=bullets_history, belief=bullets_belief, num_questions=m).strip()
+
+def get_verbalization_probability_elicitation_prompt(hypothesis: str, question: str) -> str:
+    return dedent("""
+        Assume you are playing a game of 20 Questions and you know for a fact that the secret object is a "{hypothesis_item}".
+
+        Considering this fact, what is the probability that a person would answer "Yes" to the following question:
+        "{candidate_question}"
+
+        Please respond with only a single floating-point number between 0.0 and 1.0.
+    """).format(hypothesis_item=hypothesis, candidate_question=question).strip()
+
+def get_targeting_prompt(top_item: str, history: list[tuple[str, str]]) -> str:
+    bullets_history = "\n".join(f"- Q: {h[0]}; A: {h[1]}" for h in history)
+
+    return dedent("""
+        You are playing a game of 20 Questions.
+        The game has proceeded as follows:
+        {history}
+
+        Based on this conversation, your analysis suggests the secret object is overwhelmingly likely to be "{most_likely_item}".
+
+        Your task is to make your final guess. The question must start with "Is the secret object a...".
+    """).format(history=bullets_history, most_likely_item=top_item).strip()
+
+if __name__ == '__main__':
+    # print(get_questioner_prologue(['bird', 'dog', 'cat']))
+    print(get_question_generation_prompt(20, history=[('Question 1', 'Yes'), ('Question 2', 'No')], belief_state=[('dog', 0.9), ('cat', 0.05)]))
+    print(get_answerer_prologue('cat'))
