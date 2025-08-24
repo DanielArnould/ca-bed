@@ -32,6 +32,54 @@ class QuestionNode:
         return f"Question: {self.question}"
 
 
+def serialise_tree(root: EvidenceNode) -> dict:
+    def _serialise(node: EvidenceNode | QuestionNode) -> dict:
+        match node:
+            case EvidenceNode(answer, belief_state, marginal_likelihood, _, children):
+                return {
+                    "type": "evidence",
+                    "answer": answer,
+                    "belief_state": belief_state,
+                    "marginal_likelihood": marginal_likelihood,
+                    "children": [_serialise(child) for child in children],
+                }
+            case QuestionNode(question, _, children):
+                return {
+                    "type": "question",
+                    "question": question,
+                    "children": [_serialise(child) for child in children],
+                }
+
+    return _serialise(root)
+
+
+def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
+    def _deserialise(
+        data: dict, parent: EvidenceNode | QuestionNode | None = None
+    ) -> EvidenceNode | QuestionNode:
+        match data["type"]:
+            case "evidence":
+                assert parent is None or isinstance(parent, QuestionNode)
+                node = EvidenceNode(
+                    answer=data["answer"],
+                    belief_state=data["belief_state"],
+                    marginal_likelihood=data["marginal_likelihood"],
+                    parent=parent,
+                )
+            case "question":
+                assert isinstance(parent, EvidenceNode)
+                node = QuestionNode(question=data["question"], parent=parent)
+            case node_type:
+                raise ValueError(f"Unknown node type: {node_type}")
+
+        node.children = [  # type: ignore
+            _deserialise(child_data, parent=node) for child_data in data["children"]
+        ]
+        return node
+
+    return _deserialise(serialised_tree, parent=None)  # type: ignore
+
+
 def stringify(root: EvidenceNode) -> str:
     lines = []
 
@@ -101,3 +149,7 @@ if __name__ == "__main__":
     root.children.append(question2)
 
     print(stringify(root))
+    serialised_tree = serialise_tree(root)
+    print(serialised_tree)
+    deserialised_tree = deserialise_tree(serialised_tree)
+    print(stringify(deserialised_tree))
