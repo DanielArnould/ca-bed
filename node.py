@@ -15,12 +15,21 @@ class EvidenceNode:
     parent: "QuestionNode | None" = None
     children: list["QuestionNode"] = field(default_factory=list)
 
+    def __str__(self) -> str:
+        formatted_belief_state = ", ".join(
+            [f"{hypothesis}: {prob}" for hypothesis, prob in self.belief_state.items()]
+        )
+        return f"Answer: {self.answer} | Marginal Likelihood: {self.marginal_likelihood} | Belief State: [{formatted_belief_state}]"
+
 
 @dataclass
 class QuestionNode:
     question: str
     parent: EvidenceNode
     children: list[EvidenceNode] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        return f"Question: {self.question}"
 
 
 def stringify(root: EvidenceNode) -> str:
@@ -32,33 +41,20 @@ def stringify(root: EvidenceNode) -> str:
         connector = "└── " if is_last else "├── "
 
         match node:
-            case EvidenceNode(answer, belief_state, marginal_likelihood, _, children):
-                formatted_belief_state = ", ".join(
-                    [
-                        f"{hypothesis}: {prob}"
-                        for hypothesis, prob in belief_state.items()
-                    ]
-                )
-                lines.append(
-                    f"{prefix}{connector}Answer: {answer} | Marginal Likelihood: {marginal_likelihood} | Belief State: [{formatted_belief_state}]"
-                )
+            case EvidenceNode(_, _, _, _, children) as node:
+                lines.append(f"{prefix}{connector}{str(node)}")
 
                 for i, child in enumerate(children):
                     new_prefix = prefix + ("    " if is_last else "│   ")
                     _build_string(child, new_prefix, i == len(children) - 1)
-            case QuestionNode(question, _, children):
-                lines.append(f"{prefix}{connector}Question: {question}")
+            case QuestionNode(_, _, children) as node:
+                lines.append(f"{prefix}{connector}{str(node)}")
 
                 for i, child in enumerate(children):
                     new_prefix = prefix + ("    " if is_last else "│   ")
                     _build_string(child, new_prefix, i == len(children) - 1)
 
-    formatted_belief_state = ", ".join(
-        [f"{hypothesis}: {prob}" for hypothesis, prob in root.belief_state.items()]
-    )
-    lines.append(
-        f"Answer: {root.answer} | Marginal Likelihood: {root.marginal_likelihood} | Belief State: [{formatted_belief_state}]"
-    )
+    lines.append(str(root))
     for i, child in enumerate(root.children):
         _build_string(child, "", i == len(root.children) - 1)
 
