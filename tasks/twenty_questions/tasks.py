@@ -16,6 +16,9 @@ class Bayesian(Task):
         if interaction_mode is InteractionMode.BENCHMARK:
             self._secret_answer = random.choice(self.hypothesis_space)
 
+    def __str__(self) -> str:
+        return f"Twenty Questions (Bayesian) {self.interaction_mode=}, {self._secret_answer=}, {self.max_question_nodes=}, {self.hypothesis_space=}"
+
     def get_initial_belief_state(self) -> dict[str, float]:
         prob = 1.0 / len(self.hypothesis_space)
         return {item: prob for item in self.hypothesis_space}
