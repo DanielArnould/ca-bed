@@ -1,11 +1,20 @@
+import random
 import re
-from ..task import Question, Task
+
+from node import QuestionNode
+from ..task import InteractionMode, Question, Task
 from ...node import EvidenceNode
 
 
 class Bayesian(Task):
-    def __init__(self, max_question_nodes: int):
-        super().__init__(max_question_nodes, 2, ["Dog", "Cookie", "Paint", "Hat"])
+    _secret_answer: str
+
+    def __init__(self, max_question_nodes: int, interaction_mode: InteractionMode):
+        super().__init__(
+            interaction_mode, max_question_nodes, 2, ["Dog", "Cookie", "Paint", "Hat"]
+        )
+        if interaction_mode is InteractionMode.BENCHMARK:
+            self._secret_answer = random.choice(self.hypothesis_space)
 
     def get_initial_belief_state(self) -> dict[str, float]:
         prob = 1.0 / len(self.hypothesis_space)
@@ -117,6 +126,32 @@ class Bayesian(Task):
 
         assert len(likelihoods) == len(question.answers), "Not all answers considered!"
         return likelihoods
+
+    def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
+        prompt = f"""
+        You are playing a game of 20 questions.
+        The secret thing you are thinking of is a {self._secret_answer}.
+        The question you have been asked is: "{question_node.question}"
+
+        What is the correct answer, "Yes" or "No"?
+        Please respond with only the word "Yes" or "No".
+        """
+        return prompt.strip()
+
+    def parse_answer_selection_output(
+        self, output: str, question_node: QuestionNode
+    ) -> EvidenceNode:
+        llm_answer = output.strip().lower()
+        evidence_node = next(
+            (
+                child
+                for child in question_node.children
+                if child.answer.lower() == llm_answer
+            ),
+            None,
+        )
+        assert evidence_node is not None, "No matching answer selected"
+        return evidence_node
 
 
 class Baseline: ...
