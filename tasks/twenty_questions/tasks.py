@@ -115,6 +115,7 @@ class Bayesian(Task):
                 assert 0.0 <= prob <= 1.0, "Likelihood is not a probability!"
                 likelihoods[current_answer][hypothesis] = prob
 
+        assert len(likelihoods) == len(question.answers), "Not all answers considered!"
         return likelihoods
 
 
