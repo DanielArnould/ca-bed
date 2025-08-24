@@ -9,15 +9,14 @@ getting and processing the examiner response and the guesser response
 """
 
 from itertools import chain
+from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_future_reward
 from tasks.task import Task, InteractionMode
 
 
-def call_llm(val: str) -> str: ...
-
-
 class Method:
+    model: Model
     task: Task
     max_lookahead_depth: int
     max_conversation_depth: int
@@ -27,11 +26,13 @@ class Method:
 
     def __init__(
         self,
+        model: Model,
         task: Task,
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
     ):
+        self.model = model
         self.task = task
         self.max_lookahead_depth = max_lookahead_depth
         self.max_conversation_depth = max_conversation_depth
@@ -56,9 +57,9 @@ class Method:
                     selection_prompt = self.task.get_answer_selection_prompt(
                         best_question_node
                     )
-                    selection_output = call_llm(selection_prompt)
+                    selection_output = call_llm(selection_prompt, self.model)
                     selected_evidence_node = self.task.parse_answer_selection_output(
-                        selection_output, best_question_node
+                        selection_output.string, best_question_node
                     )
 
             self._current_node = selected_evidence_node
@@ -85,17 +86,19 @@ class Method:
 
         # Generate questions
         question_gen_prompt = self.task.get_question_generation_prompt(node)
-        question_gen_output = call_llm(question_gen_prompt)
-        questions = self.task.parse_question_generation_output(question_gen_output)
+        question_gen_output = call_llm(question_gen_prompt, self.model)
+        questions = self.task.parse_question_generation_output(
+            question_gen_output.string
+        )
 
         for question in questions:
             question_node = QuestionNode(question=question.question, parent=node)
             likelihood_prompt = self.task.get_likelihood_elicitation_prompt(
                 node, question
             )
-            likelihood_output = call_llm(likelihood_prompt)
+            likelihood_output = call_llm(likelihood_prompt, self.model)
             likelihoods_for_all_answers = self.task.parse_likelihood_elicitation_output(
-                likelihood_output, question
+                likelihood_output.string, question
             )
 
             for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
