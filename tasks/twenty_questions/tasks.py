@@ -57,7 +57,9 @@ class Bayesian(Task):
         return prompt.strip()
 
     def parse_question_generation_output(self, output: str) -> list[Question]:
-        question_texts: list[str] = re.findall(r"^\d+\.\s*(.*)", output, re.MULTILINE)
+        question_texts: list[str] = re.findall(
+            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
+        )
         questions = []
 
         for question_text in question_texts:
