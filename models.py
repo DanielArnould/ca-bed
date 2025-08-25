@@ -13,6 +13,7 @@ LOGGER = logging.getLogger("LLM Models")
 class Model(Enum):
     DEEPSEEK_CHAT = auto()
     DEEPSEEK_REASONER = auto()
+    DUMMY = auto()
 
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
@@ -80,9 +81,17 @@ def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
     )
 
 
+def _call_dummy(input_text: str) -> LLMOutput:
+    print(f"[DUMMY LLM]: {input_text}")
+    response = input("Enter a response: ")
+    return LLMOutput(response)
+
+
 def call_llm(input_text: str, model: Model) -> LLMOutput:
     match model:
         case Model.DEEPSEEK_CHAT:
             return _call_deepseek_chat(input_text)
         case Model.DEEPSEEK_REASONER:
             return _call_deepseek_reasoner(input_text)
+        case Model.DUMMY:
+            return _call_dummy(input_text)
