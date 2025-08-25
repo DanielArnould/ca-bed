@@ -12,10 +12,13 @@ import copy
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
+import logging
 from models import LLMOutput, Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_future_reward
 from tasks.task import Task, InteractionMode
+
+LOGGER = logging.getLogger("Method")
 
 
 @dataclass
@@ -80,6 +83,7 @@ class Method:
         self._root = self._current_node = EvidenceNode(
             answer="ROOT", belief_state=initial_belief_state, marginal_likelihood=1.0
         )
+        LOGGER.info(f"Created root node: {str(self._root)}")
 
         while not self._is_terminal(self._current_node):
             tree_states.append(copy.deepcopy(self._root))
@@ -89,13 +93,16 @@ class Method:
             best_question_node = max(
                 self._current_node.children, key=expected_future_reward
             )
+            LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
             match self.task.interaction_mode:
                 case InteractionMode.INTERACTIVE:
+                    LOGGER.info("Posing question to user...")
                     idx, selected_evidence_node = self._pose_question(
                         best_question_node
                     )
+                    LOGGER.info(f"User selected: {str(selected_evidence_node)}")
                     interactions.append(
                         UserInteraction(
                             timestamp=datetime.now(),
@@ -110,10 +117,12 @@ class Method:
                     selection_prompt = self.task.get_answer_selection_prompt(
                         best_question_node
                     )
+                    LOGGER.info("Posing question to LLM...")
                     selection_output = call_llm(selection_prompt, self.model)
                     selected_evidence_node = self.task.parse_answer_selection_output(
                         selection_output.string, best_question_node
                     )
+                    LOGGER.info(f"LLM selected: {str(selected_evidence_node)}")
                     interactions.append(
                         LLMInteraction(
                             timestamp=datetime.now(),
@@ -133,6 +142,8 @@ class Method:
             key=self._current_node.belief_state.__getitem__,
         )
 
+        LOGGER.info(f"Completed run! Best guess: {best_guess}")
+
         return RunHistory(
             task_info=str(self.task),
             start_time=start_time,
@@ -146,10 +157,12 @@ class Method:
     def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
         # Should we continue any further?
         if curr_depth >= self.max_lookahead_depth or self._is_terminal(node):
+            LOGGER.info(f"Ending lookahead at {str(node)}")
             return
 
         # Have we already looked ahead at this stage?
         if len(node.children) > 0:
+            LOGGER.info(f"Already looked ahead at {str(node)}, skipping to children...")
             for child in chain.from_iterable(
                 question.children for question in node.children
             ):
@@ -158,6 +171,7 @@ class Method:
             return
 
         # Generate questions
+        LOGGER.info("Generating questions...")
         question_gen_prompt = self.task.get_question_generation_prompt(node)
         question_gen_output = call_llm(question_gen_prompt, self.model)
         questions = self.task.parse_question_generation_output(
@@ -166,6 +180,7 @@ class Method:
 
         for question in questions:
             question_node = QuestionNode(question=question.question, parent=node)
+            LOGGER.info(f"Getting likelihoods for question: {question.question}")
             likelihood_prompt = self.task.get_likelihood_elicitation_prompt(
                 node, question
             )
@@ -175,6 +190,7 @@ class Method:
             )
 
             for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
+                LOGGER.info(f"Updating belief state for answer: {answer}")
                 unnormalised_posterior = {
                     hypo: node.belief_state[hypo] * likelihoods_for_answer[hypo]
                     for hypo in node.belief_state
