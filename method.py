@@ -8,11 +8,42 @@ getting and processing the examiner response and the guesser response
 - Tree state.
 """
 
+import copy
+from dataclasses import dataclass
+from datetime import datetime
 from itertools import chain
-from models import Model, call_llm
+from models import LLMOutput, Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_future_reward
 from tasks.task import Task, InteractionMode
+
+
+@dataclass
+class LLMInteraction:
+    timestamp: datetime
+    prompt: str
+    model: Model
+    output: LLMOutput
+
+
+@dataclass
+class UserInteraction:
+    timestamp: datetime
+    question: str
+    options: list[str]
+    selection: int
+
+
+@dataclass
+class RunHistory:
+    task_info: str
+    start_time: datetime
+    end_time: datetime
+    interactions: list[LLMInteraction | UserInteraction]
+    # Deep copies of the root node at each iteration
+    tree_states: list[EvidenceNode]
+    final_path: list[str]
+    final_answer: str
 
 
 class Method:
@@ -23,6 +54,7 @@ class Method:
     confidence_threshold: float
 
     _current_node: EvidenceNode
+    _root: EvidenceNode
 
     def __init__(
         self,
@@ -38,21 +70,42 @@ class Method:
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold
 
-    def run(self) -> str:
+    def run(self) -> RunHistory:
+        start_time = datetime.now()
+        tree_states = []
+        final_path = []
+        interactions = []
+
         initial_belief_state = self.task.get_initial_belief_state()
-        self._current_node = EvidenceNode(
+        self._root = self._current_node = EvidenceNode(
             answer="ROOT", belief_state=initial_belief_state, marginal_likelihood=1.0
         )
 
         while not self._is_terminal(self._current_node):
+            tree_states.append(copy.deepcopy(self._root))
+            final_path.append(str(self._current_node))
+
             self._lookahead(self._current_node, 0)
             best_question_node = max(
                 self._current_node.children, key=expected_future_reward
             )
+            final_path.append(str(best_question_node))
 
             match self.task.interaction_mode:
                 case InteractionMode.INTERACTIVE:
-                    selected_evidence_node = self._pose_question(best_question_node)
+                    idx, selected_evidence_node = self._pose_question(
+                        best_question_node
+                    )
+                    interactions.append(
+                        UserInteraction(
+                            timestamp=datetime.now(),
+                            question=best_question_node.question,
+                            options=[
+                                child.answer for child in best_question_node.children
+                            ],
+                            selection=idx,
+                        )
+                    )
                 case InteractionMode.BENCHMARK:
                     selection_prompt = self.task.get_answer_selection_prompt(
                         best_question_node
@@ -61,14 +114,34 @@ class Method:
                     selected_evidence_node = self.task.parse_answer_selection_output(
                         selection_output.string, best_question_node
                     )
+                    interactions.append(
+                        LLMInteraction(
+                            timestamp=datetime.now(),
+                            prompt=selection_prompt,
+                            model=self.model,
+                            output=selection_output,
+                        )
+                    )
 
             self._current_node = selected_evidence_node
+
+        tree_states.append(copy.deepcopy(self._root))
+        final_path.append(str(self._current_node))
 
         best_guess = max(
             self._current_node.belief_state,
             key=self._current_node.belief_state.__getitem__,
         )
-        return best_guess
+
+        return RunHistory(
+            task_info=str(self.task),
+            start_time=start_time,
+            end_time=datetime.now(),
+            interactions=interactions,
+            tree_states=tree_states,
+            final_path=final_path,
+            final_answer=best_guess,
+        )
 
     def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
         # Should we continue any further?
@@ -121,7 +194,7 @@ class Method:
                 question_node.children.append(evidence_node)
                 self._lookahead(evidence_node, curr_depth + 1)
 
-    def _pose_question(self, question_node: QuestionNode) -> EvidenceNode:
+    def _pose_question(self, question_node: QuestionNode) -> tuple[int, EvidenceNode]:
         print("QUESTION".center(30, "="))
         print(question_node.question)
         print("ANSWERS".center(30, "="))
@@ -129,7 +202,7 @@ class Method:
             print(f"{i}. {evidence_node.answer}")
 
         user_selection = int(input("Select an answer: "))
-        return question_node.children[user_selection - 1]
+        return user_selection, question_node.children[user_selection - 1]
 
     def _get_conversation_depth(self, node: EvidenceNode) -> int:
         if node.parent is None:
