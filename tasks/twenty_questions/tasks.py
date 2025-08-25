@@ -3,7 +3,7 @@ import re
 
 from node import QuestionNode
 from ..task import InteractionMode, Question, Task
-from ...node import EvidenceNode
+from node import EvidenceNode
 
 
 class Bayesian(Task):
@@ -26,7 +26,7 @@ class Bayesian(Task):
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         formatted_belief_state = "\n".join(
             f"- {hypothesis}: {prob:.0%}"
-            for hypothesis, prob in current_node.belief_state
+            for hypothesis, prob in current_node.belief_state.items()
         )
 
         history = []
@@ -71,8 +71,6 @@ class Bayesian(Task):
     def get_likelihood_elicitation_prompt(
         self, current_node: EvidenceNode, question: Question
     ) -> str:
-        assert current_node.parent is not None, "current node cannot be the root!"
-
         formatted_hypotheses = ", ".join(
             f'"{hypothesis}"' for hypothesis in self.hypothesis_space
         )

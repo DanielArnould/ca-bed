@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
-from ..node import EvidenceNode, QuestionNode
+from node import EvidenceNode, QuestionNode
 
 
 @dataclass
