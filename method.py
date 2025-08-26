@@ -14,7 +14,7 @@ from datetime import datetime
 from itertools import chain
 import logging
 from models import LLMOutput, Model, call_llm
-from node import EvidenceNode, QuestionNode
+from node import EvidenceNode, QuestionNode, stringify
 from rewards import expected_future_reward
 from tasks.task import Task, InteractionMode
 
@@ -209,6 +209,8 @@ class Method:
                 )
                 question_node.children.append(evidence_node)
                 self._lookahead(evidence_node, curr_depth + 1)
+
+            node.children.append(question_node)
 
     def _pose_question(self, question_node: QuestionNode) -> tuple[int, EvidenceNode]:
         print("QUESTION".center(30, "="))
