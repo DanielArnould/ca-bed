@@ -13,13 +13,14 @@ def get_questioner_prologue(hypothesis_space: list[str]) -> str:
         Let us begin. Ask me the first question.
     """).format(hypothesis=bullets).strip()
 
-def get_answerer_prologue(ground_truth: str) -> str:
+def get_answerer_prologue(ground_truth: str, question: str) -> str:
     return dedent("""
         You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
         I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'. Note that you must never reveal X, until I guess it correctly.
         If I guess X correctly in my question, directly respond 'You guessed it. X is {target_item}.' instead of saying 'Yes'.
-        Let us begin. Here is my first question.
-    """).format(target_item=ground_truth).strip()
+        Let us begin. Here is my question:
+        {question}
+    """).format(target_item=ground_truth, question=question).strip()
 
 def get_question_generation_prompt(m: int, history: list[tuple[str, str]], belief_state: list[tuple[str, float]]) -> str:
     bullets_history = "\n".join(f"- Q: {h[0]}; A: {h[1]}" for h in history)
