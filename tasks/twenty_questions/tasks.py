@@ -67,15 +67,7 @@ class Bayesian(Task):
         return likelihoods
 
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
-        prompt = f"""
-        You are playing a game of 20 questions.
-        The secret thing you are thinking of is a {self._secret_answer}.
-        The question you have been asked is: "{question_node.question}"
-
-        What is the correct answer, "Yes" or "No"?
-        Please respond with only the word "Yes" or "No".
-        """
-        return prompt.strip()
+        return get_answerer_prologue(ground_truth=self._secret_answer, question=question_node.question)
 
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
