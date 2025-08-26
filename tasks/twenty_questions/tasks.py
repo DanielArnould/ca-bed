@@ -3,8 +3,13 @@ import re
 import json
 
 from node import QuestionNode, EvidenceNode
+from tasks.twenty_questions.prompts import (
+    get_answer_selection_prompt,
+    get_question_generation_prompt,
+    get_questioner_prologue,
+    get_verbalization_probability_elicitation_prompt,
+)
 from ..task import InteractionMode, Question, Task
-from .prompts import *
 
 
 class Bayesian(Task):
@@ -32,9 +37,13 @@ class Bayesian(Task):
             answer = node.answer
             history.append((question, answer))
             node = node.parent.parent
-        
+
         prologue = get_questioner_prologue(hypothesis_space=self.hypothesis_space)
-        generation_prompt = get_question_generation_prompt(m=self.max_question_nodes, history=history, belief_state=list(current_node.belief_state.items()))
+        generation_prompt = get_question_generation_prompt(
+            m=self.max_question_nodes,
+            history=history,
+            belief_state=list(current_node.belief_state.items()),
+        )
 
         return f"{prologue}\n\n{generation_prompt}"
 
@@ -55,7 +64,9 @@ class Bayesian(Task):
     def get_likelihood_elicitation_prompt(
         self, current_node: EvidenceNode, question: Question
     ) -> str:
-        return get_verbalization_probability_elicitation_prompt(hypothesis_space=self.hypothesis_space, question=question.question)
+        return get_verbalization_probability_elicitation_prompt(
+            hypothesis_space=self.hypothesis_space, question=question.question
+        )
 
     def parse_likelihood_elicitation_output(
         self, output: str, question: Question
@@ -64,27 +75,24 @@ class Bayesian(Task):
             answer: {} for answer in question.answers
         }
         probs = json.loads(output)
-        likelihoods['Yes'] = probs
-        likelihoods['No'] = {item: 1 - prob for item, prob in probs.items()}
+        likelihoods["Yes"] = probs
+        likelihoods["No"] = {item: 1 - prob for item, prob in probs.items()}
         return likelihoods
 
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
-        return get_answerer_prologue(ground_truth=self._secret_answer, question=question_node.question)
+        return get_answer_selection_prompt(
+            ground_truth=self._secret_answer, question=question_node.question
+        )
 
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
     ) -> EvidenceNode:
         llm_answer = output.strip().lower()
-        evidence_node = next(
-            (
-                child
-                for child in question_node.children
-                if child.answer.lower() == llm_answer
-            ),
-            None,
-        )
-        assert evidence_node is not None, "No matching answer selected"
-        return evidence_node
+        for child in question_node.children:
+            if child.answer.lower() == llm_answer:
+                return child
+
+        assert False, "No matching answer selected"
 
 
 class Baseline: ...
