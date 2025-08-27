@@ -103,13 +103,20 @@ def deserialise_run_history(history_dict: dict) -> RunHistory:
     interactions = []
     for interaction_dict in history_dict["interactions"]:
         interaction_dict: dict
-        interaction_type = interaction_dict.pop("type")
-        interaction_dict["timestamp"] = datetime.fromisoformat(
-            interaction_dict["timestamp"]
-        )
+        interaction_type = interaction_dict["type"]
+        timestamp = datetime.fromisoformat(interaction_dict["timestamp"])
 
-        if interaction_type == "llm":
-            model = Model(interaction_dict["model"])
+        if interaction_type == "user":
+            interactions.append(
+                UserInteraction(
+                    timestamp=timestamp,
+                    question=interaction_dict["question"],
+                    options=interaction_dict["options"],
+                    selection=interaction_dict["selection"],
+                )
+            )
+        elif interaction_type == "llm":
+            model = Model[interaction_dict["model"]]
             output_data = interaction_dict["output"]
             tokens = (
                 [Token(**t) for t in output_data["tokens"]]
@@ -123,25 +130,21 @@ def deserialise_run_history(history_dict: dict) -> RunHistory:
             )
             interactions.append(
                 LLMInteraction(
-                    timestamp=interaction_dict["timestamp"],
+                    timestamp=timestamp,
                     prompt=interaction_dict["prompt"],
                     model=model,
                     output=output,
                 )
             )
-        elif interaction_type == "user":
-            interactions.append(UserInteraction(**interaction_dict))
-
-    tree_states = [
-        deserialise_tree(tree_data) for tree_data in history_dict["tree_states"]
-    ]
 
     return RunHistory(
         task_info=history_dict["task_info"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
         interactions=interactions,
-        tree_states=tree_states,
+        tree_states=[
+            deserialise_tree(tree_data) for tree_data in history_dict["tree_states"]
+        ],
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
     )
