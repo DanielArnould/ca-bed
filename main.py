@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 
+from experiment_logging import serialise_run_history
 from method import Method
 from models import Model
 from tasks.task import InteractionMode
@@ -26,8 +27,8 @@ def main():
     method = Method(
         model,
         task,
-        max_lookahead_depth=2,
-        max_conversation_depth=3,
+        max_lookahead_depth=1,
+        max_conversation_depth=1,
         confidence_threshold=0.8,
     )
     history = method.run()
@@ -35,7 +36,7 @@ def main():
 
     LOGGER.info("Completed run, saving output to run.json...")
     with output_path.open("w") as f:
-        json.dump(history, f)
+        json.dump(serialise_run_history(history), f)
 
     LOGGER.info("Run saved to run.json")
 

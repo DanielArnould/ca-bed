@@ -59,23 +59,38 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
 
 
 def serialise_run_history(history: RunHistory) -> dict:
-    history_dict = asdict(history)
-
-    history_dict["start_time"] = history.start_time.isoformat()
-    if history.end_time:
-        history_dict["end_time"] = history.end_time.isoformat()
+    history_dict = {
+        "task_info": history.task_info,
+        "start_time": history.start_time.isoformat(),
+        "end_time": history.end_time.isoformat(),
+        "final_path": history.final_path,
+        "final_answer": history.final_answer,
+    }
 
     # Add a type field to each interaction
     processed_interactions = []
-    for interaction, interaction_dict in zip(
-        history.interactions, history_dict["interactions"]
-    ):
-        interaction_dict["timestamp"] = interaction.timestamp.isoformat()
+    for interaction in history.interactions:
         match interaction:
-            case LLMInteraction(_, _, _, _):
-                interaction_dict["type"] = "llm"
-            case UserInteraction(_, _, _, _):
-                interaction_dict["type"] = "user"
+            case LLMInteraction(timestamp, prompt, model, output):
+                processed_interactions.append(
+                    {
+                        "type": "llm",
+                        "timestamp": timestamp.isoformat(),
+                        "prompt": prompt,
+                        "model": model.name,
+                        "output": asdict(output),
+                    }
+                )
+            case UserInteraction(timestamp, question, options, selection):
+                processed_interactions.append(
+                    {
+                        "type": "user",
+                        "timestamp": timestamp.isoformat(),
+                        "question": question,
+                        "options": options,
+                        "selection": selection,
+                    }
+                )
 
     history_dict["interactions"] = processed_interactions
     history_dict["tree_states"] = [serialise_tree(tree) for tree in history.tree_states]

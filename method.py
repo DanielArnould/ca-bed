@@ -14,8 +14,8 @@ from datetime import datetime
 from itertools import chain
 import logging
 from models import LLMOutput, Model, call_llm
-from node import EvidenceNode, QuestionNode, stringify
-from rewards import expected_future_reward
+from node import EvidenceNode, QuestionNode
+from rewards import expected_reward
 from tasks.task import Task, InteractionMode
 
 LOGGER = logging.getLogger("Method")
@@ -90,9 +90,7 @@ class Method:
             final_path.append(str(self._current_node))
 
             self._lookahead(self._current_node, 0)
-            best_question_node = max(
-                self._current_node.children, key=expected_future_reward
-            )
+            best_question_node = max(self._current_node.children, key=expected_reward)
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 

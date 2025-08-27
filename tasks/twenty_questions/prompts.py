@@ -22,7 +22,7 @@ def get_questioner_prologue(hypothesis_space: list[str]) -> str:
 def get_answer_selection_prompt(ground_truth: str, question: str) -> str:
     return (
         dedent("""
-        You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {groun_truth}.
+        You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
         I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'. Note that you must never reveal X, until I guess it correctly.
         If I guess X correctly in my question, directly respond 'You guessed it. X is {target_item}.' instead of saying 'Yes'.
         Let us begin. Here is my question:
