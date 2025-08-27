@@ -1,9 +1,36 @@
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from method import LLMInteraction, RunHistory, UserInteraction
 from models import LLMOutput, Model, Token
 from node import EvidenceNode, QuestionNode
+
+
+@dataclass
+class LLMInteraction:
+    timestamp: datetime
+    prompt: str
+    model: Model
+    output: LLMOutput
+
+
+@dataclass
+class UserInteraction:
+    timestamp: datetime
+    question: str
+    options: list[str]
+    selection: int
+
+
+@dataclass
+class RunHistory:
+    task_info: str
+    start_time: datetime
+    end_time: datetime
+    interactions: list[LLMInteraction | UserInteraction]
+    # Deep copies of the root node at each iteration
+    tree_states: list[EvidenceNode]
+    final_path: list[str]
+    final_answer: str
 
 
 def serialise_tree(root: EvidenceNode) -> dict:

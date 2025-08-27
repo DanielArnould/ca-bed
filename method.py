@@ -13,40 +13,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 import logging
+from experiment_logging import LLMInteraction, RunHistory, UserInteraction
 from models import LLMOutput, Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_reward
 from tasks.task import Task, InteractionMode
 
 LOGGER = logging.getLogger("Method")
-
-
-@dataclass
-class LLMInteraction:
-    timestamp: datetime
-    prompt: str
-    model: Model
-    output: LLMOutput
-
-
-@dataclass
-class UserInteraction:
-    timestamp: datetime
-    question: str
-    options: list[str]
-    selection: int
-
-
-@dataclass
-class RunHistory:
-    task_info: str
-    start_time: datetime
-    end_time: datetime
-    interactions: list[LLMInteraction | UserInteraction]
-    # Deep copies of the root node at each iteration
-    tree_states: list[EvidenceNode]
-    final_path: list[str]
-    final_answer: str
 
 
 class Method:
