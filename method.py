@@ -9,12 +9,11 @@ getting and processing the examiner response and the guesser response
 """
 
 import copy
-from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 import logging
 from experiment_logging import LLMInteraction, RunHistory, UserInteraction
-from models import LLMOutput, Model, call_llm
+from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_reward
 from tasks.task import Task, InteractionMode
