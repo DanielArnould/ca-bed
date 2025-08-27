@@ -3,6 +3,7 @@ import re
 import json
 
 from node import QuestionNode, EvidenceNode
+from tasks.twenty_questions.data import THING200
 from tasks.twenty_questions.prompts import (
     get_answer_selection_prompt,
     get_question_generation_prompt,
@@ -17,13 +18,16 @@ class Bayesian(Task):
 
     def __init__(self, max_question_nodes: int, interaction_mode: InteractionMode):
         super().__init__(
-            interaction_mode, max_question_nodes, 2, ["Dog", "Cookie", "Paint", "Hat"]
+            interaction_mode,
+            max_question_nodes,
+            max_evidence_nodes=2,
+            hypothesis_space=THING200,
         )
         if interaction_mode is InteractionMode.BENCHMARK:
             self._secret_answer = random.choice(self.hypothesis_space)
 
     def __str__(self) -> str:
-        return f"Twenty Questions (Bayesian) {self.interaction_mode=}, {self._secret_answer=}, {self.max_question_nodes=}, {self.hypothesis_space=}"
+        return f"Twenty Questions (Bayesian): Interaction Mode: {self.interaction_mode}, Secret Answer: {self._secret_answer}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
 
     def get_initial_belief_state(self) -> dict[str, float]:
         prob = 1.0 / len(self.hypothesis_space)
@@ -74,7 +78,8 @@ class Bayesian(Task):
         likelihoods: dict[str, dict[str, float]] = {
             answer: {} for answer in question.answers
         }
-        probs = json.loads(output)
+        cleaned_output = output[output.find("{") : output.rfind("}") + 1]
+        probs = json.loads(cleaned_output)
         likelihoods["Yes"] = probs
         likelihoods["No"] = {item: 1 - prob for item, prob in probs.items()}
         return likelihoods
@@ -89,10 +94,12 @@ class Bayesian(Task):
     ) -> EvidenceNode:
         llm_answer = output.strip().lower()
         for child in question_node.children:
-            if child.answer.lower() == llm_answer:
+            if child.answer.lower() in llm_answer:
                 return child
 
-        assert False, "No matching answer selected"
+        assert False, (
+            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
+        )
 
 
 class Baseline: ...
