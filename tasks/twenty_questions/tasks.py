@@ -10,24 +10,23 @@ from tasks.twenty_questions.prompts import (
     get_questioner_prologue,
     get_verbalization_probability_elicitation_prompt,
 )
-from ..task import InteractionMode, Question, Task
+from ..task import Question, Task
 
 
 class Bayesian(Task):
-    _secret_answer: str
-
-    def __init__(self, max_question_nodes: int, interaction_mode: InteractionMode):
+    def __init__(self, max_question_nodes: int):
+        hypothesis_space = ["Dog", "Cookie", "Paint", "Hat"]
+        self.task_answer = random.choice(hypothesis_space)
         super().__init__(
-            interaction_mode,
+            self.task_answer,
             max_question_nodes,
             max_evidence_nodes=2,
-            hypothesis_space=THING200,
+            # hypothesis_space=THING200,
+            hypothesis_space=hypothesis_space,
         )
-        if interaction_mode is InteractionMode.BENCHMARK:
-            self._secret_answer = random.choice(self.hypothesis_space)
 
     def __str__(self) -> str:
-        return f"Twenty Questions (Bayesian): Interaction Mode: {self.interaction_mode}, Secret Answer: {self._secret_answer}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
+        return f"Twenty Questions (Bayesian): Answer: {self.task_answer}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
 
     def get_initial_belief_state(self) -> dict[str, float]:
         prob = 1.0 / len(self.hypothesis_space)
@@ -86,7 +85,7 @@ class Bayesian(Task):
 
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return get_answer_selection_prompt(
-            ground_truth=self._secret_answer, question=question_node.question
+            ground_truth=self.task_answer, question=question_node.question
         )
 
     def parse_answer_selection_output(

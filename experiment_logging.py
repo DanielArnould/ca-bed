@@ -1,32 +1,15 @@
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 
-from models import LLMOutput, Model, Token
 from node import EvidenceNode, QuestionNode
-
-
-@dataclass
-class LLMInteraction:
-    timestamp: datetime
-    prompt: str
-    model: Model
-    output: LLMOutput
-
-
-@dataclass
-class UserInteraction:
-    timestamp: datetime
-    question: str
-    options: list[str]
-    selection: int
 
 
 @dataclass
 class RunHistory:
     task_info: str
+    actual_answer: str
     start_time: datetime
     end_time: datetime
-    interactions: list[LLMInteraction | UserInteraction]
     # Deep copies of the root node at each iteration
     tree_states: list[EvidenceNode]
     final_path: list[str]
@@ -88,87 +71,24 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
 def serialise_run_history(history: RunHistory) -> dict:
     history_dict = {
         "task_info": history.task_info,
+        "actual_answer": history.actual_answer,
         "start_time": history.start_time.isoformat(),
         "end_time": history.end_time.isoformat(),
         "final_path": history.final_path,
         "final_answer": history.final_answer,
     }
 
-    # Add a type field to each interaction
-    processed_interactions = []
-    for interaction in history.interactions:
-        match interaction:
-            case LLMInteraction(timestamp, prompt, model, output):
-                processed_interactions.append(
-                    {
-                        "type": "llm",
-                        "timestamp": timestamp.isoformat(),
-                        "prompt": prompt,
-                        "model": model.name,
-                        "output": asdict(output),
-                    }
-                )
-            case UserInteraction(timestamp, question, options, selection):
-                processed_interactions.append(
-                    {
-                        "type": "user",
-                        "timestamp": timestamp.isoformat(),
-                        "question": question,
-                        "options": options,
-                        "selection": selection,
-                    }
-                )
-
-    history_dict["interactions"] = processed_interactions
     history_dict["tree_states"] = [serialise_tree(tree) for tree in history.tree_states]
 
     return history_dict
 
 
 def deserialise_run_history(history_dict: dict) -> RunHistory:
-    # Reconstruct interactions based on the 'type' field
-    interactions = []
-    for interaction_dict in history_dict["interactions"]:
-        interaction_dict: dict
-        interaction_type = interaction_dict["type"]
-        timestamp = datetime.fromisoformat(interaction_dict["timestamp"])
-
-        if interaction_type == "user":
-            interactions.append(
-                UserInteraction(
-                    timestamp=timestamp,
-                    question=interaction_dict["question"],
-                    options=interaction_dict["options"],
-                    selection=interaction_dict["selection"],
-                )
-            )
-        elif interaction_type == "llm":
-            model = Model[interaction_dict["model"]]
-            output_data = interaction_dict["output"]
-            tokens = (
-                [Token(**t) for t in output_data["tokens"]]
-                if output_data.get("tokens")
-                else None
-            )
-            output = LLMOutput(
-                string=output_data["string"],
-                reasoning=output_data.get("reasoning"),
-                tokens=tokens,
-            )
-            interactions.append(
-                LLMInteraction(
-                    timestamp=timestamp,
-                    prompt=interaction_dict["prompt"],
-                    model=model,
-                    output=output,
-                )
-            )
-
     return RunHistory(
         task_info=history_dict["task_info"],
+        actual_answer=history_dict["actual_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
-        interactions=interactions,
         tree_states=[
             deserialise_tree(tree_data) for tree_data in history_dict["tree_states"]
         ],

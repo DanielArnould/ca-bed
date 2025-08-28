@@ -12,11 +12,11 @@ import asyncio
 import copy
 from datetime import datetime
 import logging
-from experiment_logging import LLMInteraction, RunHistory, UserInteraction
+from experiment_logging import RunHistory
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_reward
-from tasks.task import Question, Task, InteractionMode
+from tasks.task import Question, Task
 
 LOGGER = logging.getLogger("Method")
 
@@ -49,7 +49,6 @@ class Method:
         start_time = datetime.now()
         tree_states = []
         final_path = []
-        interactions = []
 
         initial_belief_state = self.task.get_initial_belief_state()
         self._root = self._current_node = EvidenceNode(
@@ -66,42 +65,13 @@ class Method:
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
-            match self.task.interaction_mode:
-                case InteractionMode.INTERACTIVE:
-                    LOGGER.info("Posing question to user...")
-                    idx, selected_evidence_node = self._pose_question(
-                        best_question_node
-                    )
-                    LOGGER.info(f"User selected: {str(selected_evidence_node)}")
-                    interactions.append(
-                        UserInteraction(
-                            timestamp=datetime.now(),
-                            question=best_question_node.question,
-                            options=[
-                                child.answer for child in best_question_node.children
-                            ],
-                            selection=idx,
-                        )
-                    )
-                case InteractionMode.BENCHMARK:
-                    selection_prompt = self.task.get_answer_selection_prompt(
-                        best_question_node
-                    )
-                    LOGGER.info("Posing question to LLM...")
-                    selection_output = await call_llm(selection_prompt, self.model)
-                    selected_evidence_node = self.task.parse_answer_selection_output(
-                        selection_output.string, best_question_node
-                    )
-                    LOGGER.info(f"LLM selected: {str(selected_evidence_node)}")
-                    interactions.append(
-                        LLMInteraction(
-                            timestamp=datetime.now(),
-                            prompt=selection_prompt,
-                            model=self.model,
-                            output=selection_output,
-                        )
-                    )
-
+            selection_prompt = self.task.get_answer_selection_prompt(best_question_node)
+            LOGGER.info("Posing question to LLM...")
+            selection_output = await call_llm(selection_prompt, self.model)
+            selected_evidence_node = self.task.parse_answer_selection_output(
+                selection_output.string, best_question_node
+            )
+            LOGGER.info(f"LLM selected: {str(selected_evidence_node)}")
             self._current_node = selected_evidence_node
 
         tree_states.append(copy.deepcopy(self._root))
@@ -116,9 +86,9 @@ class Method:
 
         return RunHistory(
             task_info=str(self.task),
+            actual_answer=self.task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
-            interactions=interactions,
             tree_states=tree_states,
             final_path=final_path,
             final_answer=best_guess,
@@ -198,16 +168,6 @@ class Method:
             question_node.children.append(evidence_node)
 
         return question_node
-
-    def _pose_question(self, question_node: QuestionNode) -> tuple[int, EvidenceNode]:
-        print("QUESTION".center(30, "="))
-        print(question_node.question)
-        print("ANSWERS".center(30, "="))
-        for i, evidence_node in enumerate(question_node.children, start=1):
-            print(f"{i}. {evidence_node.answer}")
-
-        user_selection = int(input("Select an answer: "))
-        return user_selection, question_node.children[user_selection - 1]
 
     def _get_conversation_depth(self, node: EvidenceNode) -> int:
         if node.parent is None:

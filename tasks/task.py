@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum, auto
 from node import EvidenceNode, QuestionNode
 
 
@@ -10,29 +9,24 @@ class Question:
     answers: list[str]
 
 
-class InteractionMode(Enum):
-    INTERACTIVE = auto()
-    BENCHMARK = auto()
-
-
 class Task(ABC):
     """Abstract base class for all tasks that can be solved by UoT methods.
     Prompts and parsers are separated so that LLM calls remain independent of
     tasks and can be robustly tracked for history."""
 
-    interaction_mode: InteractionMode
+    task_answer: str
     max_question_nodes: int  # Max number of questions to generate at each step
     max_evidence_nodes: int  # Max possible number of answers to each question
     hypothesis_space: list[str]
 
     def __init__(
         self,
-        interaction_mode: InteractionMode,
+        task_answer: str,
         max_question_nodes: int,
         max_evidence_nodes: int,
         hypothesis_space: list[str],
     ):
-        self.interaction_mode = interaction_mode
+        self.task_answer = task_answer
         self.max_question_nodes = max_question_nodes
         self.max_evidence_nodes = max_evidence_nodes
         self.hypothesis_space = hypothesis_space

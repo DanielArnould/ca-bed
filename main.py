@@ -12,7 +12,6 @@ from pathlib import Path
 from experiment_logging import serialise_run_history
 from method import Method
 from models import Model
-from tasks.task import InteractionMode
 from tasks.twenty_questions.tasks import Bayesian
 
 LOGGER = logging.getLogger("Main")
@@ -30,7 +29,7 @@ def main():
     )
 
     model = Model.DEEPSEEK_CHAT
-    task = Bayesian(max_question_nodes=2, interaction_mode=InteractionMode.BENCHMARK)
+    task = Bayesian(max_question_nodes=2)
     method = Method(
         model,
         task,

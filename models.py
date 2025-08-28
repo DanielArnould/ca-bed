@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 import os
 
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 
 load_dotenv()
 LOGGER = logging.getLogger("LLM Models")
@@ -17,8 +17,11 @@ class Model(Enum):
 
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
-client = AsyncOpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
-LOGGER.info("Connected to Deepseek Client")
+DEEPSEEK_CLIENT = (
+    AsyncOpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
+    if DEEPSEEK_KEY is not None
+    else None
+)
 
 
 @dataclass
@@ -36,10 +39,12 @@ class LLMOutput:
 
 
 async def _call_deepseek_chat(input_text: str) -> LLMOutput:
-    assert DEEPSEEK_KEY is not None, "DEEPSEEK_KEY not found in environment!"
+    assert DEEPSEEK_CLIENT is not None, (
+        "DEEPSEEK_CLIENT not setup (have you provided a key?)"
+    )
     LOGGER.info("Sending message to Deepseek Chat")
 
-    response = await client.chat.completions.create(
+    response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-chat",
         messages=[{"role": "user", "content": input_text}],
         logprobs=True,
@@ -60,10 +65,12 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
 
 
 async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
-    assert DEEPSEEK_KEY is not None, "DEEPSEEK_KEY not found in environment!"
+    assert DEEPSEEK_CLIENT is not None, (
+        "DEEPSEEK_CLIENT not setup (have you provided a key?)"
+    )
     LOGGER.info("Sending message to Deepseek Reasoner")
 
-    response = await client.chat.completions.create(
+    response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-reasoner",
         messages=[{"role": "user", "content": input_text}],
         max_tokens=32_000,
