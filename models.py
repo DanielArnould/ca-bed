@@ -49,7 +49,7 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
         messages=[{"role": "user", "content": input_text}],
         logprobs=True,
         max_tokens=4096,
-        temperature=1.0,
+        temperature=0.0,  # UoT does not specify a temperature, but their repo suggests 0.0
         stream=False,
     )
 
