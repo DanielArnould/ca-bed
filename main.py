@@ -3,6 +3,7 @@ Unused for now, but will be an entry point for eval
 and API later.
 """
 
+import asyncio
 from datetime import datetime
 import json
 import logging
@@ -33,11 +34,11 @@ def main():
     method = Method(
         model,
         task,
-        max_lookahead_depth=2,
-        max_conversation_depth=5,
+        max_lookahead_depth=1,
+        max_conversation_depth=2,
         confidence_threshold=0.8,
     )
-    history = method.run()
+    history = asyncio.run(method.run())
     output_path = Path("logs", f"{current_time_formatted}_run.json")
 
     LOGGER.info(f"Completed run, saving output to {output_path}")

@@ -8,15 +8,15 @@ getting and processing the examiner response and the guesser response
 - Tree state.
 """
 
+import asyncio
 import copy
 from datetime import datetime
-from itertools import chain
 import logging
 from experiment_logging import LLMInteraction, RunHistory, UserInteraction
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_reward
-from tasks.task import Task, InteractionMode
+from tasks.task import Question, Task, InteractionMode
 
 LOGGER = logging.getLogger("Method")
 
@@ -45,7 +45,7 @@ class Method:
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold
 
-    def run(self) -> RunHistory:
+    async def run(self) -> RunHistory:
         start_time = datetime.now()
         tree_states = []
         final_path = []
@@ -61,7 +61,7 @@ class Method:
             tree_states.append(copy.deepcopy(self._root))
             final_path.append(str(self._current_node))
 
-            self._lookahead(self._current_node, 0)
+            await self._lookahead(self._current_node, 0)
             best_question_node = max(self._current_node.children, key=expected_reward)
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
@@ -88,7 +88,7 @@ class Method:
                         best_question_node
                     )
                     LOGGER.info("Posing question to LLM...")
-                    selection_output = call_llm(selection_prompt, self.model)
+                    selection_output = await call_llm(selection_prompt, self.model)
                     selected_evidence_node = self.task.parse_answer_selection_output(
                         selection_output.string, best_question_node
                     )
@@ -124,63 +124,77 @@ class Method:
             final_answer=best_guess,
         )
 
-    def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
+    async def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
         # Should we continue any further?
         if curr_depth >= self.max_lookahead_depth or self._is_terminal(node):
             LOGGER.info(f"Ending lookahead at {str(node)}")
             return
 
-        # Have we already looked ahead at this stage?
-        if len(node.children) > 0:
-            LOGGER.info(f"Already looked ahead at {str(node)}, skipping to children...")
-            for child in chain.from_iterable(
-                question.children for question in node.children
-            ):
-                self._lookahead(child, curr_depth + 1)
-
-            return
-
         # Generate questions
-        LOGGER.info("Generating questions...")
-        question_gen_prompt = self.task.get_question_generation_prompt(node)
-        question_gen_output = call_llm(question_gen_prompt, self.model)
-        questions = self.task.parse_question_generation_output(
-            question_gen_output.string
+        if len(node.children) == 0:
+            LOGGER.info("Generating questions...")
+            question_gen_prompt = self.task.get_question_generation_prompt(node)
+            question_gen_output = await call_llm(question_gen_prompt, self.model)
+            questions = self.task.parse_question_generation_output(
+                question_gen_output.string
+            )
+
+            create_question_node_tasks = [
+                asyncio.create_task(
+                    self._create_question_node(
+                        self.task.get_likelihood_elicitation_prompt(node, question),
+                        question,
+                        node,
+                    )
+                )
+                for question in questions
+            ]
+
+            LOGGER.info(
+                f"Creating {len(create_question_node_tasks)} question nodes concurrently..."
+            )
+            processed_question_nodes = await asyncio.gather(*create_question_node_tasks)
+            node.children.extend(processed_question_nodes)
+
+        recursive_tasks = [
+            self._lookahead(child, curr_depth + 1)
+            for question in node.children
+            for child in question.children
+        ]
+        LOGGER.info(
+            f"Performing recursive lookahead for {len(recursive_tasks)} new nodes concurrently..."
+        )
+        await asyncio.gather(*recursive_tasks)
+
+    async def _create_question_node(
+        self, prompt: str, question: Question, parent_node: EvidenceNode
+    ) -> QuestionNode:
+        question_node = QuestionNode(question=question.question, parent=parent_node)
+
+        likelihood_output = await call_llm(prompt, self.model)
+        likelihoods_for_all_answers = self.task.parse_likelihood_elicitation_output(
+            likelihood_output.string, question
         )
 
-        for question in questions:
-            question_node = QuestionNode(question=question.question, parent=node)
-            LOGGER.info(f"Getting likelihoods for question: {question.question}")
-            likelihood_prompt = self.task.get_likelihood_elicitation_prompt(
-                node, question
+        for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
+            unnormalised_posterior = {
+                hypo: parent_node.belief_state[hypo] * likelihoods_for_answer[hypo]
+                for hypo in parent_node.belief_state
+            }
+            marginal_likelihood = sum(unnormalised_posterior.values())
+            posterior = {
+                hypo: prob / marginal_likelihood
+                for hypo, prob in unnormalised_posterior.items()
+            }
+            evidence_node = EvidenceNode(
+                answer=answer,
+                belief_state=posterior,
+                marginal_likelihood=marginal_likelihood,
+                parent=question_node,
             )
-            likelihood_output = call_llm(likelihood_prompt, self.model)
-            likelihoods_for_all_answers = self.task.parse_likelihood_elicitation_output(
-                likelihood_output.string, question
-            )
+            question_node.children.append(evidence_node)
 
-            for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
-                LOGGER.info(f"Updating belief state for answer: {answer}")
-                unnormalised_posterior = {
-                    hypo: node.belief_state[hypo] * likelihoods_for_answer[hypo]
-                    for hypo in node.belief_state
-                }
-
-                marginal_likelihood = sum(unnormalised_posterior.values())
-                posterior = {
-                    hypo: prob / marginal_likelihood
-                    for hypo, prob in unnormalised_posterior.items()
-                }
-                evidence_node = EvidenceNode(
-                    answer=answer,
-                    belief_state=posterior,
-                    marginal_likelihood=marginal_likelihood,
-                    parent=question_node,
-                )
-                question_node.children.append(evidence_node)
-                self._lookahead(evidence_node, curr_depth + 1)
-
-            node.children.append(question_node)
+        return question_node
 
     def _pose_question(self, question_node: QuestionNode) -> tuple[int, EvidenceNode]:
         print("QUESTION".center(30, "="))
