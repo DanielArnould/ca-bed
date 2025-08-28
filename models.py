@@ -49,6 +49,7 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
     )
 
     LOGGER.info("Received response from Deepseek Chat")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         tokens=[
@@ -69,6 +70,7 @@ async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
     )
 
     LOGGER.info("Received response from Deepseek Chat")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         reasoning=response.choices[0].message.reasoning_content,  # type: ignore

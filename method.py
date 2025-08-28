@@ -175,6 +175,9 @@ class Method:
         likelihoods_for_all_answers = self.task.parse_likelihood_elicitation_output(
             likelihood_output.string, question
         )
+        LOGGER.debug(
+            f"Likelihoods for question '{question}' are {likelihoods_for_all_answers}"
+        )
 
         for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
             unnormalised_posterior = {
