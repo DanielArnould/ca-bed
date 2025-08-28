@@ -110,9 +110,3 @@ class Bayesian(Task):
 
 
 class Baseline: ...
-
-
-class Nonbinary: ...
-
-
-class NonbinaryBayesian: ...
