@@ -14,14 +14,22 @@ from ..task import Question, Task
 
 
 class Bayesian(Task):
-    def __init__(self, max_question_nodes: int):
-        hypothesis_space = ["Dog", "Cookie", "Paint", "Hat"]
-        self.task_answer = random.choice(hypothesis_space)
+    def __init__(
+        self,
+        task_answer: str,
+        max_question_nodes: int,
+        max_lookahead_depth: int,
+        max_conversation_depth: int,
+        confidence_threshold: float,
+        hypothesis_space: list[str],
+    ):
         super().__init__(
-            self.task_answer,
+            task_answer,
             max_question_nodes,
             max_evidence_nodes=2,
-            # hypothesis_space=THING200,
+            max_lookahead_depth=max_lookahead_depth,
+            max_conversation_depth=max_conversation_depth,
+            confidence_threshold=confidence_threshold,
             hypothesis_space=hypothesis_space,
         )
 

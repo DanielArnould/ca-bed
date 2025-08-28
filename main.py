@@ -29,13 +29,17 @@ def main():
     )
 
     model = Model.DEEPSEEK_CHAT
-    task = Bayesian(max_question_nodes=2)
-    method = Method(
-        model,
-        task,
+    task = Bayesian(
+        task_answer="Cookie",
+        max_question_nodes=2,
         max_lookahead_depth=1,
         max_conversation_depth=2,
         confidence_threshold=0.8,
+        hypothesis_space=["Dog", "Cookie", "Paint", "Hat"],
+    )
+    method = Method(
+        model,
+        task,
     )
     history = asyncio.run(method.run())
     output_path = Path("logs", f"{current_time_formatted}_run.json")

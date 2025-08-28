@@ -24,26 +24,13 @@ LOGGER = logging.getLogger("Method")
 class Method:
     model: Model
     task: Task
-    max_lookahead_depth: int
-    max_conversation_depth: int
-    confidence_threshold: float
 
     _current_node: EvidenceNode
     _root: EvidenceNode
 
-    def __init__(
-        self,
-        model: Model,
-        task: Task,
-        max_lookahead_depth: int,
-        max_conversation_depth: int,
-        confidence_threshold: float,
-    ):
+    def __init__(self, model: Model, task: Task):
         self.model = model
         self.task = task
-        self.max_lookahead_depth = max_lookahead_depth
-        self.max_conversation_depth = max_conversation_depth
-        self.confidence_threshold = confidence_threshold
 
     async def run(self) -> RunHistory:
         start_time = datetime.now()
@@ -96,7 +83,7 @@ class Method:
 
     async def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
         # Should we continue any further?
-        if curr_depth >= self.max_lookahead_depth or self._is_terminal(node):
+        if curr_depth >= self.task.max_lookahead_depth or self._is_terminal(node):
             LOGGER.info(f"Ending lookahead at {str(node)}")
             return
 
@@ -176,8 +163,11 @@ class Method:
         return 1 + self._get_conversation_depth(node.parent.parent)
 
     def _is_terminal(self, node: EvidenceNode) -> bool:
-        return self._get_conversation_depth(node) >= self.max_conversation_depth or any(
-            prob >= self.confidence_threshold for prob in node.belief_state.values()
+        return self._get_conversation_depth(
+            node
+        ) >= self.task.max_conversation_depth or any(
+            prob >= self.task.confidence_threshold
+            for prob in node.belief_state.values()
         )
 
 
