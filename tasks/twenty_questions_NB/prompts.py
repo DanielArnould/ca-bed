@@ -74,7 +74,7 @@ def get_verbalization_probability_elicitation_prompt(
 
         Return exactly in this format (no extra text, JUST WHAT I'M FORMATTING BELOW):
 
-        Question 1: <question string>
+        Question 1: <question>
         YES: aaaa, bbbb, ...
         Count of YES: <integer>
         NO: cccc, dddd, ...
@@ -84,17 +84,12 @@ def get_verbalization_probability_elicitation_prompt(
 
 
 def get_targeting_prompt(top_item: str, history: list[tuple[str, str]]) -> str:
-    bullets_history = "\n".join(f"- Q: {h[0]}; A: {h[1]}" for h in history)
 
     return (
         dedent("""
-        You are playing a game of 20 Questions.
-        The game has proceeded as follows:
-        {history}
-
-        Based on this conversation, your analysis suggests the secret object is overwhelmingly likely to be "{most_likely_item}".
-
-        Your task is to make your final guess. The question must start with "Is the secret object a...".
+        Note that you should guess and ask what X exactly is from now on. X is possible a:
+        {top_item}, or other.
+        The question must start with 'Is X ..
     """)
         .format(history=bullets_history, most_likely_item=top_item)
         .strip()
