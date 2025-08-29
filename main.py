@@ -13,6 +13,7 @@ from experiment_logging import serialise_run_history
 from method import Method
 from models import Model
 from tasks.twenty_questions.tasks import Bayesian
+from tasks.twenty_questions_NB.tasks import Non_Bayesian
 
 LOGGER = logging.getLogger("Main")
 
@@ -28,8 +29,8 @@ def main():
         ],
     )
 
-    model = Model.DEEPSEEK_CHAT
-    task = Bayesian(
+    model = Model.DUMMY
+    task = Non_Bayesian(
         task_answer="Cookie",
         max_question_nodes=2,
         max_lookahead_depth=1,
