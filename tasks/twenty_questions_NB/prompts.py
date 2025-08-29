@@ -83,12 +83,11 @@ def get_verbalization_probability_elicitation_prompt(
     return dedent(tpl).strip()
 
 
-def get_targeting_prompt(top_item: str, history: list[tuple[str, str]]) -> str:
+def get_targeting_prompt(hypothesis_space: list[str], history: list[tuple[str, str]]) -> str:
 
     return (
         dedent("""
-        Note that you should guess and ask what X exactly is from now on. X is possible a:
-        {top_item}, or other.
+        Note that you should guess and ask what X exactly is from now on. All possible X are in: {hypothesis_space}
         The question must start with 'Is X ..
     """)
         .format(history=bullets_history, most_likely_item=top_item)
