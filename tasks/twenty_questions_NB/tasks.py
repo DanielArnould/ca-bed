@@ -58,9 +58,10 @@ class Non_Bayesian(Task):
 
         return f"{prologue}\n\n{generation_prompt}"
 
+
     def parse_question_generation_output(self, output: str) -> list[Question]:
         question_texts: list[str] = re.findall(
-            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
+            r"^Question\s+\d+:\s*(.*?)\s*YES:", output, re.MULTILINE
         )
         questions = []
 
@@ -71,7 +72,6 @@ class Non_Bayesian(Task):
             )
 
         return questions
-
     def get_likelihood_elicitation_prompt(
         self, current_node: EvidenceNode, question: Question
     ) -> str:
@@ -79,16 +79,27 @@ class Non_Bayesian(Task):
             hypothesis_space=self.hypothesis_space, question=question.question
         )
 
-    def parse_likelihood_elicitation_output(
-        self, output: str, question: Question
-    ) -> dict[str, dict[str, float]]:
-        likelihoods: dict[str, dict[str, float]] = {
-            answer: {} for answer in question.answers
-        }
-        cleaned_output = output[output.find("{") : output.rfind("}") + 1]
-        probs = json.loads(cleaned_output)
+    def parse_likelihood_elicitation_output(self, output: str, question) -> dict[str, dict[str, float]]:
+        likelihoods: dict[str, dict[str, float]] = {answer: {} for answer in question.answers}
+
+        # grab text after YES: until "Count"
+        m_yes = re.search(r'YES:\s*(.*?)\s*Count', output, re.DOTALL)
+        m_no  = re.search(r'NO:\s*(.*?)\s*Count', output, re.DOTALL)
+
+        yes_items = [s.strip() for s in m_yes.group(1).split(",")] if m_yes else []
+        no_items  = [s.strip() for s in m_no.group(1).split(",")] if m_no else []
+        print(yes_items)
+        print(no_items)
+        probs = {}
+        for item in yes_items:
+            if item:
+                probs[item] = 1.0
+        for item in no_items:
+            if item:
+                probs[item] = 0.0
+
         likelihoods["Yes"] = probs
-        likelihoods["No"] = {item: 1 - prob for item, prob in probs.items()}
+        likelihoods["No"] = {item: 1.0 - p for item, p in probs.items()}
         return likelihoods
 
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:

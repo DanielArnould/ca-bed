@@ -109,3 +109,14 @@ At a given evidence node, the optimal next question is determined by a lookahead
 6. *Execute & Iterate:* Pose the selected question to the user. Transition to the evidence node corresponding to their answer and repeat the procedure.
 7. *Terminate:* The process terminates when a hypothesis $h_i$ in the belief state exceeds the confidence threshold $tau_"confidence"$ or the conversation depth reaches $D_"ask"$.
 #todo(position: "inline")[In general, we need to better specify how the LLM calls are made and what context they are given]
+
+=== Reproducing Non-Baysian UoT with our current archteicture \
+recall our belief update derived above: 
+$
+P(h_i | E_1, ..., E_k) = (P(h_i | E_1, ..., E_(k - 1)) times P(E_k | h_i)) / (sum_(j = 1)^n P(h_j | E_1, ..., E_(k - 1)) times P(E_k | h_j))
+$
+
+UoT probability update based on a binary split is illustrated below: 
+$
+P(h_i | E_1, ..., E_k) = (P(h_i | E_1, ..., E_(k - 1)) times P(E_k | h_i)) / (sum_(j = 1)^n P(h_j | E_1, ..., E_(k - 1)) times P(E_k | h_j))
+$

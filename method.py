@@ -92,6 +92,7 @@ class Method:
             LOGGER.info("Generating questions...")
             question_gen_prompt = self.task.get_question_generation_prompt(node)
             question_gen_output = await call_llm(question_gen_prompt, self.model)
+            print("hello: ", question_gen_output.string)
             questions = self.task.parse_question_generation_output(
                 question_gen_output.string
             )

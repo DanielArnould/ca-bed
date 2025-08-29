@@ -35,78 +35,52 @@ def get_answer_selection_prompt(ground_truth: str, question: str) -> str:
 def get_question_generation_prompt(
     m: int, history: list[tuple[str, str]], belief_state: list[tuple[str, float]]
 ) -> str:
-    bullets_history = "\n".join(f"- Q: {h[0]}; A: {h[1]}" for h in history)
-    bullets_belief = "\n".join(
-        f"- X: {b[0]}; Probability: {b[1]}" for b in belief_state
-    )
+    items = [h for (h, _p) in belief_state]
+    items_str = "\n".join(f"- {x}" for x in items)
 
-    if len(bullets_history) == 0:
-        return (
-            dedent("""
-            Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
-            {belief}
+    asked = ""
+    if history:
+        asked_pairs = "; ".join([f"Q: {q}" for (q, _) in history])
+        asked = f"You already asked: {asked_pairs}."
 
-            Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
-            Format your response in this structure:
-            1. <Question 1>
-            2. <Question 2>
-            ...
-            n. <Question n>
-    """)
-            .format(history=bullets_history, belief=bullets_belief, num_questions=m)
-            .strip()
-        )
+    tpl = f'''Here are all the X:
+        {items_str}
 
-    return (
-        dedent("""
-        The game has proceeded as follows:
-        {history}
-
-        Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
-        {belief}
-
-        Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
-        Format your response in this structure:
-        1. <Question 1>
-        2. <Question 2>
-        ...
-        n. <Question n>
-    """)
-        .format(history=bullets_history, belief=bullets_belief, num_questions=m)
-        .strip()
-    )
+        Please design a question about X and can only be answer by YES or NO. {asked} Then classify the possible X above based on this question. If the answer is 'YES', put this X into 'YES: ...', otherwise to 'NO: ...'. Finally calculate how many X in YES and NO.
+        Notably, this question should fulfill that the count of YES and NO are almost the same with a permissible discrepancy of no more than one!
+        You should think about best {m} questions to response. And your answer should be(NO EXTRA TEXT):
+        Question 1: Is X ...?
+        YES: aaa, bbb, ...
+        Count of YES: ...
+        NO: ccc, ddd, ...
+        Count of NO: ...
+    '''
+    return dedent(tpl).strip()
 
 def get_verbalization_probability_elicitation_prompt(
     hypothesis_space: list[str], question: str
 ) -> str:
-    # P(E_k | h_i) = 1 for non baysian version
-    bullets = "\n".join(f"- {h}" for h in hypothesis_space)
+    items_str = "\n".join(f"- {x}" for x in hypothesis_space)
 
-    return (
-        dedent("""
-        Assume you are playing a game of 20 Questions. You need to estimate the probability of a "Yes" answer for a list of different potential secret objects, given a single question.
+    tpl = f"""
+        Here are all the X:
+        {items_str}
 
-        The question is:
-        "{candidate_question}"
+        Classify the X based on this single yes/no question:
+        Question: "{question}"
 
-        For each item, return 1 if that person would answer "yes" if that item were the secret object, return 0 otherwise. Do not use probabilities or words like "maybe". Only 0 or 1 are allowed.
-            
-        Items:
-        {hypothesis}
+        If the answer would be YES when that X is the secret object, put it in YES; otherwise put it in NO.
+        Use the item strings exactly as listed. Cover all items exactly once (no omissions, no duplicates).
 
-        Return ONLY a single flat JSON object mapping item -> 0 or 1.
+        Return exactly in this format (no extra text, JUST WHAT I'M FORMATTING BELOW):
 
-        Example format for the question "Is it an animal?":
-        {{
-        "Dog": 1,
-        "Cookie": 0,
-        "Paint": 0,
-        "Hat": 0
-        }}
-    """)
-        .format(hypothesis=bullets, candidate_question=question)
-        .strip()
-    )
+        Question 1: {question}
+        YES: aaaa, bbbb, ...
+        Count of YES: <integer>
+        NO: cccc, dddd, ...
+        Count of NO: <integer>
+    """
+    return dedent(tpl).strip()
 
 
 def get_targeting_prompt(top_item: str, history: list[tuple[str, str]]) -> str:
