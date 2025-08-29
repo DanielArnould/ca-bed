@@ -48,12 +48,19 @@ class Non_Bayesian(Task):
             answer = node.answer
             history.append((question, answer))
             node = node.parent.parent
-
-        prologue = get_questioner_prologue(hypothesis_space=self.hypothesis_space)
+        
+        hypothesis_space = []
+        belief_states = []
+        for h, p in current_node.belief_state.items():
+            if p > 0:
+                belief_states.append((h,p))
+                hypothesis_space.append(h)
+        
+        prologue = get_questioner_prologue(hypothesis_space=hypothesis_space)
         generation_prompt = get_question_generation_prompt(
             m=self.max_question_nodes,
             history=history,
-            belief_state=list(current_node.belief_state.items()),
+            belief_state=list(belief_states),
         )
 
         return f"{prologue}\n\n{generation_prompt}"
@@ -75,8 +82,12 @@ class Non_Bayesian(Task):
     def get_likelihood_elicitation_prompt(
         self, current_node: EvidenceNode, question: Question
     ) -> str:
+        hypothesis_space = []
+        for h, p in current_node.belief_state.items():
+            if p > 0:
+                hypothesis_space.append(h)
         return get_verbalization_probability_elicitation_prompt(
-            hypothesis_space=self.hypothesis_space, question=question.question
+            hypothesis_space=hypothesis_space, question=question.question
         )
 
     def parse_likelihood_elicitation_output(self, output: str, question) -> dict[str, dict[str, float]]:
@@ -86,21 +97,13 @@ class Non_Bayesian(Task):
         m_yes = re.search(r'YES:\s*(.*?)\s*Count', output, re.DOTALL)
         m_no  = re.search(r'NO:\s*(.*?)\s*Count', output, re.DOTALL)
 
-        yes_items = [s.strip() for s in m_yes.group(1).split(",")] if m_yes else []
-        no_items  = [s.strip() for s in m_no.group(1).split(",")] if m_no else []
-        print(yes_items)
-        print(no_items)
-        probs = {}
-        for item in yes_items:
-            if item:
-                probs[item] = 1.0
-        for item in no_items:
-            if item:
-                probs[item] = 0.0
+        yes_set = set([s.strip() for s in m_yes.group(1).split(",")] if m_yes else [])
+        no_set  = set([s.strip() for s in m_no.group(1).split(",")] if m_no else [])
+        hs = set(self.hypothesis_space)
+        likelihoods_yes = {h: (1.0 if h in yes_set else 0.0) for h in hs}  
+        likelihoods_no  = {h: (1.0 if h in no_set  else 0.0) for h in hs} 
 
-        likelihoods["Yes"] = probs
-        likelihoods["No"] = {item: 1.0 - p for item, p in probs.items()}
-        return likelihoods
+        return {"Yes": likelihoods_yes, "No": likelihoods_no}
 
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return get_answer_selection_prompt(

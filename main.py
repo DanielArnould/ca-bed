@@ -32,10 +32,10 @@ def main():
     model = Model.DUMMY
     task = Non_Bayesian(
         task_answer="Cookie",
-        max_question_nodes=2,
-        max_lookahead_depth=1,
-        max_conversation_depth=2,
-        confidence_threshold=0.8,
+        max_question_nodes=3,
+        max_lookahead_depth=2,
+        max_conversation_depth=3,
+        confidence_threshold=1.0,
         hypothesis_space=["Dog", "Cookie", "Paint", "Hat"],
     )
     method = Method(

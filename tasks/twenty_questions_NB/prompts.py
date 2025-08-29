@@ -74,7 +74,7 @@ def get_verbalization_probability_elicitation_prompt(
 
         Return exactly in this format (no extra text, JUST WHAT I'M FORMATTING BELOW):
 
-        Question 1: {question}
+        Question 1: <question string>
         YES: aaaa, bbbb, ...
         Count of YES: <integer>
         NO: cccc, dddd, ...
