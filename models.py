@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from enum import Enum, auto
-import logging
 from dotenv import load_dotenv
 import os
 
 from openai import AsyncOpenAI
 
+from loggers import get_logger
+
 load_dotenv()
-LOGGER = logging.getLogger("LLM Models")
 
 
 class Model(Enum):
@@ -42,7 +42,8 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
     assert DEEPSEEK_CLIENT is not None, (
         "DEEPSEEK_CLIENT not setup (have you provided a key?)"
     )
-    LOGGER.info("Sending message to Deepseek Chat")
+    logger = get_logger("LLM Models")
+    logger.info("Sending message to Deepseek Chat")
 
     response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-chat",
@@ -53,8 +54,8 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
         stream=False,
     )
 
-    LOGGER.info("Received response from Deepseek Chat")
-    LOGGER.debug(str(response))
+    logger.info("Received response from Deepseek Chat")
+    logger.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         tokens=[
@@ -68,7 +69,8 @@ async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
     assert DEEPSEEK_CLIENT is not None, (
         "DEEPSEEK_CLIENT not setup (have you provided a key?)"
     )
-    LOGGER.info("Sending message to Deepseek Reasoner")
+    logger = get_logger("LLM Models")
+    logger.info("Sending message to Deepseek Reasoner")
 
     response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-reasoner",
@@ -76,8 +78,8 @@ async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
         max_tokens=32_000,
     )
 
-    LOGGER.info("Received response from Deepseek Chat")
-    LOGGER.debug(str(response))
+    logger.info("Received response from Deepseek Chat")
+    logger.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         reasoning=response.choices[0].message.reasoning_content,  # type: ignore

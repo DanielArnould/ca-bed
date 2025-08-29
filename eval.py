@@ -21,7 +21,8 @@ def get_run_eval(run_history: RunHistory) -> RunEval:
         run_history.actual_answer.strip().lower()
         in run_history.final_answer.strip().lower()
     )
-    conversation_length = len(run_history.final_path)
+    # UoT considers answer/questions as one interaction
+    conversation_length = len(run_history.final_path) // 2
     return RunEval(did_pass, conversation_length)
 
 

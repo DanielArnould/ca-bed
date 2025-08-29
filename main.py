@@ -6,50 +6,62 @@ and API later.
 import asyncio
 from datetime import datetime
 import json
-import logging
+import multiprocessing
 from pathlib import Path
 
 from experiment_logging import serialise_run_history
+from loggers import get_logger, setup_logger
 from method import Method
 from models import Model
+from tasks.task import Task
+from tasks.twenty_questions.data import COMMON
 from tasks.twenty_questions.tasks import Bayesian
-from tasks.twenty_questions_NB.tasks import Non_Bayesian
-
-LOGGER = logging.getLogger("Main")
 
 
-def main():
+def run_task(task: Task, model: Model):
     current_time_formatted = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="[%(asctime)s][%(levelname)s][%(name)s]: %(message)s",
-        handlers=[
-            logging.FileHandler(f"logs/{current_time_formatted}.log"),
-            logging.StreamHandler(),
-        ],
-    )
+    current_process = multiprocessing.current_process()
+    current_process.name = f"{task.__class__.__name__}-{task.task_answer}"
+    output_dir = Path(f"logs/{current_time_formatted}/")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    setup_logger("Main", output_dir)
+    setup_logger("Method", output_dir)
+    setup_logger("LLM Models", output_dir)
+    logger = get_logger("Main")
 
-    model = Model.DUMMY
-    task = Non_Bayesian(
-        task_answer="Cookie",
-        max_question_nodes=3,
-        max_lookahead_depth=2,
-        max_conversation_depth=3,
-        confidence_threshold=1.0,
-        hypothesis_space=["Dog", "Cookie", "Paint", "Hat"],
-    )
     method = Method(
         model,
         task,
     )
     history = asyncio.run(method.run())
-    output_path = Path("logs", f"{current_time_formatted}_run.json")
+    run_history_path = output_dir / f"{current_process.name}_run.json"
 
-    LOGGER.info(f"Completed run, saving output to {output_path}")
-    with output_path.open("w") as f:
+    logger.info(f"Completed run, saving output to {run_history_path}")
+    with run_history_path.open("w") as f:
         json.dump(serialise_run_history(history), f)
 
-    LOGGER.info(f"Run saved to {output_path}")
+    logger.info(f"Run saved to {run_history_path}")
+
+
+def main():
+    model = Model.DEEPSEEK_CHAT
+    tasks = [
+        Bayesian(
+            task_answer=item,
+            max_question_nodes=3,
+            max_lookahead_depth=3,
+            max_conversation_depth=20,
+            confidence_threshold=0.7,
+            hypothesis_space=COMMON,
+        )
+        for item in COMMON[1:2]
+    ]
+
+    num_cores = multiprocessing.cpu_count()
+    with multiprocessing.Pool(
+        processes=num_cores,
+    ) as pool:
+        pool.starmap(run_task, [(task, model) for task in tasks])
 
 
 if __name__ == "__main__":

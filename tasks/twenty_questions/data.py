@@ -69,7 +69,7 @@ Places = [
     "Machu Picchu",
     "Taj Mahal",
     "The White House",
-    "Stonehenge ",
+    "Stonehenge",
     "Disney World",
     "Louvre",
     "The North Pole",

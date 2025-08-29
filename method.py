@@ -11,19 +11,19 @@ getting and processing the examiner response and the guesser response
 import asyncio
 import copy
 from datetime import datetime
-import logging
+from logging import Logger
 from experiment_logging import RunHistory
+from loggers import get_logger
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from rewards import expected_reward
 from tasks.task import Question, Task
 
-LOGGER = logging.getLogger("Method")
-
 
 class Method:
     model: Model
     task: Task
+    logger: Logger
 
     _current_node: EvidenceNode
     _root: EvidenceNode
@@ -31,6 +31,7 @@ class Method:
     def __init__(self, model: Model, task: Task):
         self.model = model
         self.task = task
+        self.logger = get_logger("Method")
 
     async def run(self) -> RunHistory:
         start_time = datetime.now()
@@ -41,7 +42,7 @@ class Method:
         self._root = self._current_node = EvidenceNode(
             answer="ROOT", belief_state=initial_belief_state, marginal_likelihood=1.0
         )
-        LOGGER.info(f"Created root node: {str(self._root)}")
+        self.logger.info(f"Created root node: {str(self._root)}")
 
         while not self._is_terminal(self._current_node):
             tree_states.append(copy.deepcopy(self._root))
@@ -49,16 +50,16 @@ class Method:
 
             await self._lookahead(self._current_node, 0)
             best_question_node = max(self._current_node.children, key=expected_reward)
-            LOGGER.info(f"Selected question node: {str(best_question_node)}")
+            self.logger.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
             selection_prompt = self.task.get_answer_selection_prompt(best_question_node)
-            LOGGER.info("Posing question to LLM...")
+            self.logger.info("Posing question to LLM...")
             selection_output = await call_llm(selection_prompt, self.model)
             selected_evidence_node = self.task.parse_answer_selection_output(
                 selection_output.string, best_question_node
             )
-            LOGGER.info(f"LLM selected: {str(selected_evidence_node)}")
+            self.logger.info(f"LLM selected: {str(selected_evidence_node)}")
             self._current_node = selected_evidence_node
 
         tree_states.append(copy.deepcopy(self._root))
@@ -69,7 +70,7 @@ class Method:
             key=self._current_node.belief_state.__getitem__,
         )
 
-        LOGGER.info(f"Completed run! Best guess: {best_guess}")
+        self.logger.info(f"Completed run! Best guess: {best_guess}")
 
         return RunHistory(
             task_info=str(self.task),
@@ -84,12 +85,12 @@ class Method:
     async def _lookahead(self, node: EvidenceNode, curr_depth: int) -> None:
         # Should we continue any further?
         if curr_depth >= self.task.max_lookahead_depth or self._is_terminal(node):
-            LOGGER.info(f"Ending lookahead at {str(node)}")
+            self.logger.info(f"Ending lookahead at {str(node)}")
             return
 
         # Generate questions
         if len(node.children) == 0:
-            LOGGER.info("Generating questions...")
+            self.logger.info("Generating questions...")
             question_gen_prompt = self.task.get_question_generation_prompt(node)
             question_gen_output = await call_llm(question_gen_prompt, self.model)
             questions = self.task.parse_question_generation_output(
@@ -107,7 +108,7 @@ class Method:
                 for question in questions
             ]
 
-            LOGGER.info(
+            self.logger.info(
                 f"Creating {len(create_question_node_tasks)} question nodes concurrently..."
             )
             processed_question_nodes = await asyncio.gather(*create_question_node_tasks)
@@ -118,7 +119,7 @@ class Method:
             for question in node.children
             for child in question.children
         ]
-        LOGGER.info(
+        self.logger.info(
             f"Performing recursive lookahead for {len(recursive_tasks)} new nodes concurrently..."
         )
         await asyncio.gather(*recursive_tasks)
@@ -132,7 +133,7 @@ class Method:
         likelihoods_for_all_answers = self.task.parse_likelihood_elicitation_output(
             likelihood_output.string, question
         )
-        LOGGER.debug(
+        self.logger.debug(
             f"Likelihoods for question '{question}' are {likelihoods_for_all_answers}"
         )
 
@@ -143,7 +144,7 @@ class Method:
             }
             marginal_likelihood = sum(unnormalised_posterior.values())
             posterior = {
-                hypo: prob / marginal_likelihood
+                hypo: (prob / marginal_likelihood) if marginal_likelihood > 0 else 0
                 for hypo, prob in unnormalised_posterior.items()
             }
             evidence_node = EvidenceNode(
