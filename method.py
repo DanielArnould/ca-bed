@@ -138,10 +138,17 @@ class Method:
         )
 
         for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
-            unnormalised_posterior = {
-                hypo: parent_node.belief_state[hypo] * likelihoods_for_answer[hypo]
-                for hypo in parent_node.belief_state
-            }
+            unnormalised_posterior: dict[str, float] = {}
+            for hypo, belief in parent_node.belief_state.items():
+                if hypo not in likelihoods_for_answer:
+                    self.logger.warning(
+                        f"{hypo} not found in likelihoods! Defaulting to 0..."
+                    )
+
+                unnormalised_posterior[hypo] = belief * likelihoods_for_answer.get(
+                    hypo, 0
+                )
+
             marginal_likelihood = sum(unnormalised_posterior.values())
             posterior = {
                 hypo: (prob / marginal_likelihood) if marginal_likelihood > 0 else 0
