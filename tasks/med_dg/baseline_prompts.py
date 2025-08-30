@@ -107,5 +107,5 @@ def get_targeting_prompt() -> str:
     return dedent("""
         Note that you should point out and ask what disease the patient suffers from now.
         Refer to the past conversation regarding the patient's symptoms. Never repeat previously asked questions.
-        Ask the question with following the format: 'Are you experiencing [disease name]?'
+        The questions must start with 'Are you suffering from ...'
     """).strip()
