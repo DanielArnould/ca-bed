@@ -27,7 +27,7 @@ def get_run_eval(run_history: RunHistory) -> RunEval:
 
 
 def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
-    success_rate = sum(run_eval.success for run_eval in run_evals)
+    success_rate = sum(run_eval.success for run_eval in run_evals) / len(run_evals)
     mean_conversation_length = sum(
         run_eval.conversation_length for run_eval in run_evals
     ) / len(run_evals)
