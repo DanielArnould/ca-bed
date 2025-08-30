@@ -164,19 +164,18 @@ class Method:
 
         return question_node
 
-    def _get_conversation_depth(self, node: EvidenceNode) -> int:
-        if node.parent is None:
-            return 0
-
-        return 1 + self._get_conversation_depth(node.parent.parent)
-
     def _is_terminal(self, node: EvidenceNode) -> bool:
-        return self._get_conversation_depth(
-            node
-        ) >= self.task.max_conversation_depth or any(
+        return get_conversation_depth(node) >= self.task.max_conversation_depth or any(
             prob >= self.task.confidence_threshold
             for prob in node.belief_state.values()
         )
+
+
+def get_conversation_depth(node: EvidenceNode) -> int:
+    if node.parent is None:
+        return 0
+
+    return 1 + get_conversation_depth(node.parent.parent)
 
 
 if __name__ == "__main__":
