@@ -103,7 +103,7 @@ async def _call_dummy(input_text: str) -> LLMOutput:
     return LLMOutput(response)
 
 
-@retry(stop=stop_after_attempt(10), wait=wait_random_exponential(min=3, max=360))
+@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=3, max=360))
 async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
     assert OPENAI_CLIENT is not None, (
         "OPENAI_CLIENT not setup (have you provided a key?)"
@@ -126,7 +126,7 @@ async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
     )
 
 
-@retry(stop=stop_after_attempt(10), wait=wait_random_exponential(min=3, max=360))
+@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=3, max=360))
 async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
     assert OPENAI_CLIENT is not None, (
         "OPENAI_CLIENT not setup (have you provided a key?)"
@@ -137,9 +137,6 @@ async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
     response = await OPENAI_CLIENT.chat.completions.create(
         model="gpt-5-nano-2025-08-07",
         messages=[{"role": "user", "content": input_text}],
-        max_tokens=500,
-        temperature=0.0,
-        n=1,
     )
 
     logger.info("Received response from gpt-5-nano")
