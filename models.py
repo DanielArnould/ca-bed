@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 import os
 
 from openai import AsyncOpenAI
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from loggers import get_logger
 
@@ -14,6 +19,8 @@ class Model(Enum):
     DEEPSEEK_CHAT = auto()
     DEEPSEEK_REASONER = auto()
     DUMMY = auto()
+    GPT_4O_MINI = auto()
+    GPT_5_NANO = auto()
 
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
@@ -22,6 +29,9 @@ DEEPSEEK_CLIENT = (
     if DEEPSEEK_KEY is not None
     else None
 )
+
+OPENAI_KEY = os.getenv("OPENAI_KEY")
+OPENAI_CLIENT = AsyncOpenAI(api_key=OPENAI_KEY) if OPENAI_KEY is not None else None
 
 
 @dataclass
@@ -93,6 +103,52 @@ async def _call_dummy(input_text: str) -> LLMOutput:
     return LLMOutput(response)
 
 
+@retry(stop=stop_after_attempt(10), wait=wait_random_exponential(min=3, max=360))
+async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
+    assert OPENAI_CLIENT is not None, (
+        "OPENAI_CLIENT not setup (have you provided a key?)"
+    )
+    logger = get_logger("LLM Models")
+    logger.info("Sending message to gpt-4o-mini")
+
+    response = await OPENAI_CLIENT.chat.completions.create(
+        model="gpt-4o-mini-2024-07-18",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=500,
+        temperature=0.0,
+        n=1,
+    )
+
+    logger.info("Received response from gpt-4o-mini")
+    logger.debug(str(response))
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
+@retry(stop=stop_after_attempt(10), wait=wait_random_exponential(min=3, max=360))
+async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
+    assert OPENAI_CLIENT is not None, (
+        "OPENAI_CLIENT not setup (have you provided a key?)"
+    )
+    logger = get_logger("LLM Models")
+    logger.info("Sending message to gpt-5-nano")
+
+    response = await OPENAI_CLIENT.chat.completions.create(
+        model="gpt-5-nano-2025-08-07",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=500,
+        temperature=0.0,
+        n=1,
+    )
+
+    logger.info("Received response from gpt-5-nano")
+    logger.debug(str(response))
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
 async def call_llm(input_text: str, model: Model) -> LLMOutput:
     match model:
         case Model.DEEPSEEK_CHAT:
@@ -101,3 +157,7 @@ async def call_llm(input_text: str, model: Model) -> LLMOutput:
             return await _call_deepseek_reasoner(input_text)
         case Model.DUMMY:
             return await _call_dummy(input_text)
+        case Model.GPT_4O_MINI:
+            return await _call_gpt_4o_mini(input_text)
+        case Model.GPT_5_NANO:
+            return await _call_gpt_5_nano(input_text)
