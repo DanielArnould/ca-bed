@@ -15,7 +15,6 @@ class Baseline(Task):
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
-        confidence_threshold: float,
         hypothesis_space: list[str],
         self_report: str,
     ):
@@ -26,7 +25,7 @@ class Baseline(Task):
             max_evidence_nodes=2,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
-            confidence_threshold=confidence_threshold,
+            confidence_threshold=1.0,
             hypothesis_space=hypothesis_space,
         )
 
