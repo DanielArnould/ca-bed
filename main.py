@@ -46,7 +46,7 @@ def run_task(task: Task, model: Model):
 def main():
     model = Model.DEEPSEEK_CHAT
     tasks = [
-        Bayesian(
+        Baseline(
             task_answer=item,
             max_question_nodes=3,
             max_lookahead_depth=3,

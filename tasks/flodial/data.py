@@ -20,10 +20,9 @@ def load_data() -> list[FlodialInstance]:
     ]
 
 
-def test():
+def get_hypothesis_space():
     data = load_data()
-    print(len(data))
-    for instance in data:
-        print(f'issue: {instance.self_report} - cause - {instance.target}')
+    get_hypothesis_space = list(set([ins.target for ins in data]))
+    return get_hypothesis_space
         
-test()
+get_hypothesis_space()
