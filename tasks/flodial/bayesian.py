@@ -1,7 +1,7 @@
+import json
 import re
 from textwrap import dedent
 
-from method import get_conversation_depth
 from node import EvidenceNode, QuestionNode
 from ..task import Question, Task
 
@@ -69,12 +69,12 @@ class Bayesian(Task):
                 .strip()
             )
             prompt_parts.append(previous_questions_text)
-            
+
         belief_state = "\n".join(
-            f"- Disease: {hypo}; Probability: {prob}"
+            f"- Issue: {hypo}; Probability: {prob}"
             for hypo, prob in current_node.belief_state.items()
         )
-        
+
         generation_prompt = (
             dedent("""\
             Based on our current beliefs, the issues of the client's issue is one of the following:
@@ -87,9 +87,7 @@ class Bayesian(Task):
             ...
             n. <Question n>
             """)
-            .format(
-                belief=belief_state, num_questions=self.max_question_nodes
-            )
+            .format(belief=belief_state, num_questions=self.max_question_nodes)
             .strip()
         )
         prompt_parts.append(generation_prompt)
@@ -125,7 +123,7 @@ class Bayesian(Task):
 
             For each of the following diseases, estimate the probability that a patient would answer "Yes" to the question above if they were indeed facing that issue.
 
-            Diseases:
+            Issues:
             {hypothesis_space}
 
             Please provide your response ONLY as a single JSON object. The keys should be the issue and the values should be the estimated probability (a float between 0.0 and 1.0).
@@ -153,14 +151,11 @@ class Bayesian(Task):
         probs = json.loads(cleaned_output)
         return {"Yes": probs, "No": {item: 1 - prob for item, prob in probs.items()}}
 
-
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""\
             You are the client with a device that has '{target_item}' and I am the technician.
             I will ask you up to 20 questions and you should answer each one truthfully based on the issue of your device.
-            If I point out correctly what your issue is, answer me "You are right. My device has '{target_item}'."
-            Note that never directly tell me what the issue is all the time.
             Let us begin. Here is my first question.
             {question}
             """)

@@ -15,7 +15,6 @@ class Baseline(Task):
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
-        confidence_threshold: float,
         hypothesis_space: list[str],
         self_report: str,
     ):
@@ -26,7 +25,7 @@ class Baseline(Task):
             max_evidence_nodes=2,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
-            confidence_threshold=confidence_threshold,
+            confidence_threshold=1.0,
             hypothesis_space=hypothesis_space,
         )
 
@@ -95,7 +94,7 @@ class Baseline(Task):
         )
         prompt_parts.append(generation_prompt)
 
-        if get_conversation_depth(current_node) >= 0.6 * 20:
+        if get_conversation_depth(current_node) >= 14:
             target_prompt = dedent("""\
                 Note that you should point out and ask what the issue the client's facing for the given report problem is from now.
                 The question must be 'Are you experiencing [issue name]?
@@ -132,7 +131,7 @@ class Baseline(Task):
             
             Here are all issues that the client may face with: {items_str}. 
 
-            Classify the disease based on this single yes/no question:
+            Classify the issues based on this single yes/no question:
             Question: "{question}"
 
             The answer would be YES when the patient is indeed facing that issue, put it in YES; otherwise put it in NO.
@@ -147,7 +146,9 @@ class Baseline(Task):
             Count of NO: <integer> (issues names only)
             """)
             .format(
-                issue=self.self_report, items_str=items_str, question=question
+                self_report=self.self_report,
+                items_str=items_str,
+                question=question.question,
             )
             .strip()
         )
@@ -167,14 +168,11 @@ class Baseline(Task):
 
         return {"Yes": likelihoods_yes, "No": likelihoods_no}
 
-
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""\
             You are the client with a device that has '{target_item}' and I am the technician.
             I will ask you up to 20 questions and you should answer each one truthfully based on the issue of your device.
-            If I point out correctly what your issue is, answer me "You are right. My device has '{target_item}'."
-            Note that never directly tell me what the issue is all the time.
             Let us begin. Here is my first question.
             {question}
             """)
