@@ -1,9 +1,3 @@
-"""
-This module contains the key constructs for the tree structure needed for enhanced UoT.
-The tree structure ought to be as extendable as possible, but reward functions
-may need to be differentiated and selected by the method.
-"""
-
 from dataclasses import dataclass, field
 
 

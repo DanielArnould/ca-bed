@@ -183,3 +183,8 @@ def get_conversation_depth(node: EvidenceNode) -> int:
         return 0
 
     return 1 + get_conversation_depth(node.parent.parent)
+
+
+def get_uniform_belief_state(hypothesis_space: list[str]) -> dict[str, float]:
+    prob = 1.0 / len(hypothesis_space)
+    return {item: prob for item in hypothesis_space}

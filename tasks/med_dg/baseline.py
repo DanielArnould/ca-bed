@@ -32,10 +32,6 @@ class Baseline(Task):
     def __str__(self) -> str:
         return f"MedDG (Non-Bayesian): Answer: {self.task_answer}, Self Report: {self.self_report}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
 
-    def get_initial_belief_state(self) -> dict[str, float]:
-        prob = 1.0 / len(self.hypothesis_space)
-        return {item: prob for item in self.hypothesis_space}
-
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         prompt_parts = []
         history = []

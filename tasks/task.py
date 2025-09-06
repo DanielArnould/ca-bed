@@ -41,10 +41,6 @@ class Task(ABC):
         self.hypothesis_space = hypothesis_space
 
     @abstractmethod
-    def get_initial_belief_state(self) -> dict[str, float]:
-        pass
-
-    @abstractmethod
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         """
         From the current node, create a prompt that asks for new questions
