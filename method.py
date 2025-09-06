@@ -2,7 +2,7 @@ import asyncio
 import copy
 from datetime import datetime
 import logging
-from experiment_logging import RunHistory
+from history import RunHistory
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from question_clustering import QuestionClustering
@@ -80,6 +80,9 @@ class Method:
             tree_states=tree_states,
             final_path=final_path,
             final_answer=best_guess,
+            question_clusters=[
+                cluster.questions for cluster in self.question_clustering.clusters
+            ],
         )
 
     async def lookahead(self, node: EvidenceNode, curr_depth: int, task: Task) -> None:
@@ -150,14 +153,19 @@ class Method:
             for hypo, belief in parent_node.belief_state.items():
                 if hypo not in likelihoods_for_answer:
                     LOGGER.warning(
-                        f"{hypo} not found in likelihoods! Defaulting to 0..."
+                        f"{hypo} not found in likelihoods! Defaulting to 1..."
                     )
 
                 unnormalised_posterior[hypo] = belief * likelihoods_for_answer.get(
-                    hypo, 0
+                    hypo, 1
                 )
 
             marginal_likelihood = sum(unnormalised_posterior.values())
+            if marginal_likelihood == 0:
+                LOGGER.warning(
+                    "Marginal likelihood of 0, creating a zeroed belief state..."
+                )
+
             posterior = {
                 hypo: (prob / marginal_likelihood) if marginal_likelihood > 0 else 0
                 for hypo, prob in unnormalised_posterior.items()
