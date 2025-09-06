@@ -14,6 +14,7 @@ class RunHistory:
     tree_states: list[EvidenceNode]
     final_path: list[str]
     final_answer: str
+    question_clusters: list[list[str]]
 
 
 def serialise_tree(root: EvidenceNode) -> dict:
@@ -76,6 +77,7 @@ def serialise_run_history(history: RunHistory) -> dict:
         "end_time": history.end_time.isoformat(),
         "final_path": history.final_path,
         "final_answer": history.final_answer,
+        "question_clusters": history.question_clusters,
     }
 
     history_dict["tree_states"] = [serialise_tree(tree) for tree in history.tree_states]
@@ -94,4 +96,5 @@ def deserialise_run_history(history_dict: dict) -> RunHistory:
         ],
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
+        question_clusters=history_dict["question_clusters"],
     )
