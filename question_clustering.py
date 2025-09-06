@@ -1,18 +1,23 @@
 from dataclasses import dataclass
+import logging
 from operator import itemgetter
 from sentence_transformers import SentenceTransformer, util
 import torch
+
+LOGGER = logging.getLogger("Question Clustering")
 
 
 @dataclass
 class Cluster:
     centroid: torch.Tensor
     likelihoods: dict[str, dict[str, float]]  # Answer -> hypothesis -> likelihood
+    embeddings: torch.Tensor
     questions: list[str]
 
     def add_question(self, question: str, embedding: torch.Tensor) -> None:
         self.questions.append(question)
-        self.centroid = torch.mean(torch.stack([self.centroid, embedding]), dim=0)
+        self.embeddings = torch.cat([self.embeddings, embedding.unsqueeze(0)])
+        self.centroid = torch.mean(self.embeddings, dim=0)
 
 
 class QuestionClustering:
@@ -20,7 +25,12 @@ class QuestionClustering:
     threshold: float
     model: SentenceTransformer
 
-    def __init__(self, model_name="quora-distilbert-multilingual", threshold=0.95):
+    def __init__(
+        self, threshold: float, model_name: str = "quora-distilbert-multilingual"
+    ):
+        LOGGER.info(
+            f"Setting up question cluster with model '{model_name}' and threshold '{threshold}'"
+        )
         self.model = SentenceTransformer(model_name)
         self.threshold = threshold
         self.clusters = []
@@ -49,4 +59,6 @@ class QuestionClustering:
         embedding: torch.Tensor,
         likelihoods: dict[str, dict[str, float]],
     ) -> None:
-        self.clusters.append(Cluster(embedding, likelihoods, [question]))
+        self.clusters.append(
+            Cluster(embedding, likelihoods, embedding.unsqueeze(0), [question])
+        )
