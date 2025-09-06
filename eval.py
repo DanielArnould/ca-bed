@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from experiment_logging import RunHistory
+from history import RunHistory
 
 
 @dataclass
