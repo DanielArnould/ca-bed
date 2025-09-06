@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+import logging
 from dotenv import load_dotenv
 import os
 
@@ -10,9 +11,9 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from loggers import get_logger
-
 load_dotenv()
+
+LOGGER = logging.getLogger("LLM Models")
 
 
 class Model(Enum):
@@ -52,8 +53,7 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
     assert DEEPSEEK_CLIENT is not None, (
         "DEEPSEEK_CLIENT not setup (have you provided a key?)"
     )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to Deepseek Chat")
+    LOGGER.info("Sending message to Deepseek Chat")
 
     response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-chat",
@@ -64,8 +64,8 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
         stream=False,
     )
 
-    logger.info("Received response from Deepseek Chat")
-    logger.debug(str(response))
+    LOGGER.info("Received response from Deepseek Chat")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         tokens=[
@@ -79,8 +79,7 @@ async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
     assert DEEPSEEK_CLIENT is not None, (
         "DEEPSEEK_CLIENT not setup (have you provided a key?)"
     )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to Deepseek Reasoner")
+    LOGGER.info("Sending message to Deepseek Reasoner")
 
     response = await DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-reasoner",
@@ -88,8 +87,8 @@ async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
         max_tokens=32_000,
     )
 
-    logger.info("Received response from Deepseek Chat")
-    logger.debug(str(response))
+    LOGGER.info("Received response from Deepseek Chat")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
         reasoning=response.choices[0].message.reasoning_content,  # type: ignore
@@ -108,8 +107,7 @@ async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
     assert OPENAI_CLIENT is not None, (
         "OPENAI_CLIENT not setup (have you provided a key?)"
     )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to gpt-4o-mini")
+    LOGGER.info("Sending message to gpt-4o-mini")
 
     response = await OPENAI_CLIENT.chat.completions.create(
         model="gpt-4o-mini-2024-07-18",
@@ -119,8 +117,8 @@ async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
         n=1,
     )
 
-    logger.info("Received response from gpt-4o-mini")
-    logger.debug(str(response))
+    LOGGER.info("Received response from gpt-4o-mini")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
     )
@@ -131,16 +129,15 @@ async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
     assert OPENAI_CLIENT is not None, (
         "OPENAI_CLIENT not setup (have you provided a key?)"
     )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to gpt-5-nano")
+    LOGGER.info("Sending message to gpt-5-nano")
 
     response = await OPENAI_CLIENT.chat.completions.create(
         model="gpt-5-nano-2025-08-07",
         messages=[{"role": "user", "content": input_text}],
     )
 
-    logger.info("Received response from gpt-5-nano")
-    logger.debug(str(response))
+    LOGGER.info("Received response from gpt-5-nano")
+    LOGGER.debug(str(response))
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore
     )
