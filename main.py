@@ -28,10 +28,10 @@ def main():
         force=True,
     )
 
-    benchmark_model = Model.DEEPSEEK_CHAT
-    method_model = Model.DEEPSEEK_CHAT
+    benchmark_model = Model.GPT_4O_MINI
+    method_model = Model.GPT_4O_MINI
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    question_clustering = QuestionClustering(threshold=0.95)
+    question_clustering = QuestionClustering(threshold=0.99)
     initial_belief_state = get_uniform_belief_state(MED_DG_SET)
 
     method = Method(
@@ -40,6 +40,7 @@ def main():
 
     dataset = load_data()
     subset = dataset[:50]
+
     tasks = [
         Bayesian(
             task_answer=item.disease,
