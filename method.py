@@ -140,9 +140,20 @@ class Method:
             likelihoods_for_all_answers = task.parse_likelihood_elicitation_output(
                 likelihood_output.string, question
             )
-            self.question_clustering.add_cluster(
-                question.question, question_embedding, likelihoods_for_all_answers
+
+            existing_cluster = self.question_clustering.get_nearest_cluster(
+                question_embedding
             )
+            if existing_cluster is None:
+                self.question_clustering.add_cluster(
+                    question.question, question_embedding, likelihoods_for_all_answers
+                )
+            else:
+                LOGGER.warning(
+                    "RACE CONDITION: Cluster was added by another task while waiting for LLM. Using existing likelihoods"
+                )
+                likelihoods_for_all_answers = existing_cluster.likelihoods
+                existing_cluster.add_question(question.question, question_embedding)
         else:
             LOGGER.info("Question cluster found, using existing likelihoods...")
             likelihoods_for_all_answers = nearest_cluster.likelihoods
