@@ -1,13 +1,15 @@
 import asyncio
+from collections import deque
 import copy
 from datetime import datetime
+from itertools import chain
 import logging
 from history import RunHistory
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from question_clustering import QuestionClustering
 from rewards import expected_reward
-from tasks.task import Question, Task
+from tasks.task import Task
 
 LOGGER = logging.getLogger("Method")
 
@@ -46,18 +48,18 @@ class Method:
             tree_states.append(copy.deepcopy(self.root))
             final_path.append(str(current_node))
 
-            await self.lookahead(current_node, 0, task)
+            await self.expand_evidence([current_node], task, 0)
             best_question_node = max(current_node.children, key=expected_reward)
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
             selection_prompt = task.get_answer_selection_prompt(best_question_node)
-            LOGGER.info("Posing question to LLM...")
+            LOGGER.info("Posing question to Benchmark LLM...")
             selection_output = await call_llm(selection_prompt, self.benchmark_model)
             selected_evidence_node = task.parse_answer_selection_output(
                 selection_output.string, best_question_node
             )
-            LOGGER.info(f"LLM selected: {str(selected_evidence_node)}")
+            LOGGER.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
             current_node = selected_evidence_node
 
         tree_states.append(copy.deepcopy(self.root))
@@ -85,111 +87,113 @@ class Method:
             ],
         )
 
-    async def lookahead(self, node: EvidenceNode, curr_depth: int, task: Task) -> None:
-        # Should we continue any further?
-        if curr_depth >= task.max_lookahead_depth or self.is_terminal(node, task):
-            LOGGER.info(f"Ending lookahead at {str(node)}")
+    async def expand_evidence(
+        self, level: list[EvidenceNode], task: Task, current_depth: int
+    ) -> None:
+        # Filter out terminal nodes and check if reached lookahead limit
+        active = [node for node in level if not self.is_terminal(node, task)]
+        if current_depth >= task.max_lookahead_depth or not active:
             return
 
-        # Generate questions
-        if len(node.children) == 0:
-            LOGGER.info("Generating questions...")
-            question_gen_prompt = task.get_question_generation_prompt(node)
-            question_gen_output = await call_llm(question_gen_prompt, self.method_model)
-            questions = task.parse_question_generation_output(
-                question_gen_output.string
-            )
-
-            create_question_node_tasks = [
-                asyncio.create_task(self.create_question_node(question, node, task))
-                for question in questions
-            ]
-
-            LOGGER.info(f"Creating {len(create_question_node_tasks)} question nodes")
-
-            processed_question_nodes = await asyncio.gather(*create_question_node_tasks)
-            node.children.extend(processed_question_nodes)
-
-        recursive_tasks = [
-            self.lookahead(child, curr_depth + 1, task)
-            for question in node.children
-            for child in question.children
+        # Generate follow-up questions for all nodes on this level concurrently
+        prompts = [task.get_question_generation_prompt(node) for node in active]
+        outputs = await asyncio.gather(
+            *[call_llm(p, self.method_model) for p in prompts]
+        )
+        new_questions = [
+            task.parse_question_generation_output(out.string) for out in outputs
         ]
-        LOGGER.info(
-            f"Performing recursive lookahead for {len(recursive_tasks)} nodes..."
+
+        # Create questions nodes and build next level
+        next_level: list[QuestionNode] = []
+        for questions, parent in zip(new_questions, active):
+            new_question_nodes = [QuestionNode(q, parent) for q in questions]
+            parent.children.extend(new_question_nodes)
+            next_level.extend(new_question_nodes)
+
+        await self.lookahead_when_at_question_node(next_level, task, current_depth)
+
+    async def lookahead_when_at_question_node(
+        self, level: list[QuestionNode], task: Task, current_depth: int
+    ) -> None:
+        if not level:
+            return
+
+        # Get or create question clusters. If a new cluster is generated
+        # later questions in the same list may also join it
+        clusters = [
+            self.question_clustering.get_cluster(node.question) for node in level
+        ]
+        new_clusters = list(
+            set(cluster for cluster in clusters if cluster.likelihoods is None)
         )
-        await asyncio.gather(*recursive_tasks)
 
-    async def create_question_node(
-        self, question: Question, parent_node: EvidenceNode, task: Task
-    ) -> QuestionNode:
-        question_node = QuestionNode(question=question.question, parent=parent_node)
-
-        question_embedding = self.question_clustering.get_embedding(question.question)
-        nearest_cluster = self.question_clustering.get_nearest_cluster(
-            question_embedding
-        )
-        if nearest_cluster is None:
-            LOGGER.info(
-                f"Question cluster not found for '{question.question}', querying LLM for likelihoods..."
-            )
-            likelihood_output = await call_llm(
-                task.get_likelihood_elicitation_prompt(parent_node, question),
-                self.method_model,
-            )
-            likelihoods_for_all_answers = task.parse_likelihood_elicitation_output(
-                likelihood_output.string, question
-            )
-
-            existing_cluster = self.question_clustering.get_nearest_cluster(
-                question_embedding
-            )
-            if existing_cluster is None:
-                self.question_clustering.add_cluster(
-                    question.question, question_embedding, likelihoods_for_all_answers
-                )
-            else:
-                LOGGER.warning(
-                    "RACE CONDITION: Cluster was added by another task while waiting for LLM. Using existing likelihoods"
-                )
-                likelihoods_for_all_answers = existing_cluster.likelihoods
-                existing_cluster.add_question(question.question, question_embedding)
-        else:
-            LOGGER.info("Question cluster found, using existing likelihoods...")
-            likelihoods_for_all_answers = nearest_cluster.likelihoods
-            nearest_cluster.add_question(question.question, question_embedding)
-
-        for answer, likelihoods_for_answer in likelihoods_for_all_answers.items():
-            unnormalised_posterior: dict[str, float] = {}
-            for hypo, belief in parent_node.belief_state.items():
-                if hypo not in likelihoods_for_answer:
-                    LOGGER.warning(
-                        f"{hypo} not found in likelihoods! Defaulting to 1..."
+        # Calculate likelihoods for new clusters concurrently
+        if new_clusters:
+            # Use the first question (the one that generated) the cluster
+            # as input to the likelihood elicitation for determinism
+            outputs = await asyncio.gather(
+                *[
+                    call_llm(
+                        task.get_likelihood_elicitation_prompt(c.questions[0]),
+                        self.method_model,
                     )
-
-                unnormalised_posterior[hypo] = belief * likelihoods_for_answer.get(
-                    hypo, 1
-                )
-
-            marginal_likelihood = sum(unnormalised_posterior.values())
-            if marginal_likelihood == 0:
-                LOGGER.warning(
-                    "Marginal likelihood of 0, creating a zeroed belief state..."
-                )
-
-            posterior = {
-                hypo: (prob / marginal_likelihood) if marginal_likelihood > 0 else 0
-                for hypo, prob in unnormalised_posterior.items()
-            }
-            evidence_node = EvidenceNode(
-                answer=answer,
-                belief_state=posterior,
-                marginal_likelihood=marginal_likelihood,
-                parent=question_node,
+                    for c in new_clusters
+                ]
             )
-            question_node.children.append(evidence_node)
 
-        return question_node
+            for output, cluster in zip(outputs, new_clusters):
+                cluster.likelihoods = task.parse_likelihood_elicitation_output(
+                    output.string
+                )
+
+        # Create evidence nodes and build next level
+        next_level: list[EvidenceNode] = []
+        for question_node, cluster in zip(level, clusters):
+            assert cluster.likelihoods is not None, "Likelihoods missing!"
+
+            for answer, likelihoods in cluster.likelihoods.items():
+                posterior, marginal = self.calculate_posterior(
+                    question_node.parent.belief_state, likelihoods
+                )
+                evidence_node = EvidenceNode(
+                    answer=answer,
+                    belief_state=posterior,
+                    marginal_likelihood=marginal,
+                    parent=question_node,
+                )
+                question_node.children.append(evidence_node)
+                next_level.append(evidence_node)
+
+        await self.expand_evidence(next_level, task, current_depth + 1)
+
+    def calculate_posterior(
+        self, prior: dict[str, float], likelihoods: dict[str, float]
+    ) -> tuple[dict[str, float], float]:
+        # Calculate unnormalised posterior: P(hypothesis) * P(evidence|hypothesis)
+        unnormalised_posterior: dict[str, float] = {}
+        for hypo, prior_belief in prior.items():
+            likelihood = likelihoods.get(hypo, 1.0)
+            if hypo not in likelihoods:
+                LOGGER.warning(f"{hypo} not found in likelihoods! Defaulting to 1...")
+            unnormalised_posterior[hypo] = prior_belief * likelihood
+
+        # Calculate marginal (normalisation constant)
+        marginal = sum(unnormalised_posterior.values())
+
+        # We can only get a 0 marginal if the parent has a zeroed belief state (impossible)
+        # or the likelihoods are all 0, in which case it's justified to make a zeroed belief state
+        if marginal == 0:
+            LOGGER.warning(
+                "Marginal likelihood of 0, creating a zeroed belief state..."
+            )
+            posterior = {hypo: 0.0 for hypo in unnormalised_posterior}
+        else:
+            posterior = {
+                hypo: (prob / marginal) for hypo, prob in unnormalised_posterior.items()
+            }
+
+        return posterior, marginal
 
     def is_terminal(self, node: EvidenceNode, task: Task) -> bool:
         return get_conversation_depth(node) >= task.max_conversation_depth or any(
