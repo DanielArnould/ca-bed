@@ -1,9 +1,10 @@
 import json
 import re
 from textwrap import dedent
+from typing import override
 
 from node import EvidenceNode, QuestionNode
-from ..task import Question, Task
+from ..task import Task
 
 
 class Bayesian(Task):
@@ -33,6 +34,7 @@ class Bayesian(Task):
     def __str__(self) -> str:
         return f"MedDG (Bayesian): Answer: {self.task_answer}, Self Report: {self.self_report}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
 
+    @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         prompt_parts = []
         history = []
@@ -94,23 +96,18 @@ class Bayesian(Task):
 
         return "\n\n".join(prompt_parts)
 
-    def parse_question_generation_output(self, output: str) -> list[Question]:
+    @override
+    def parse_question_generation_output(self, output: str) -> list[str]:
         question_texts: list[str] = re.findall(
             r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
         )
-        questions = []
+        return [
+            question_text.strip().replace("?", "") + "?"
+            for question_text in question_texts
+        ]
 
-        for question_text in question_texts:
-            clean_question_text = question_text.strip().replace("?", "") + "?"
-            questions.append(
-                Question(question=clean_question_text, answers=["Yes", "No"])
-            )
-
-        return questions
-
-    def get_likelihood_elicitation_prompt(
-        self, current_node: EvidenceNode, question: Question
-    ) -> str:
+    @override
+    def get_likelihood_elicitation_prompt(self, question: str) -> str:
         hypothesis_space = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
 
         return (
@@ -139,18 +136,20 @@ class Bayesian(Task):
             .format(
                 self_report=self.self_report,
                 hypothesis_space=hypothesis_space,
-                candidate_question=question.question,
+                candidate_question=question,
             )
             .strip()
         )
 
+    @override
     def parse_likelihood_elicitation_output(
-        self, output: str, question: Question
+        self, output: str
     ) -> dict[str, dict[str, float]]:
         cleaned_output = output[output.find("{") : output.rfind("}") + 1]
         probs = json.loads(cleaned_output)
         return {"Yes": probs, "No": {item: 1 - prob for item, prob in probs.items()}}
 
+    @override
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""\
@@ -164,6 +163,7 @@ class Bayesian(Task):
             .strip()
         )
 
+    @override
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
     ) -> EvidenceNode:
