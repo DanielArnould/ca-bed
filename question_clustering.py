@@ -10,9 +10,10 @@ LOGGER = logging.getLogger("Question Clustering")
 @dataclass
 class Cluster:
     centroid: torch.Tensor
-    likelihoods: dict[str, dict[str, float]]  # Answer -> hypothesis -> likelihood
     embeddings: torch.Tensor
     questions: list[str]
+    # Answer -> hypothesis -> likelihood
+    likelihoods: dict[str, dict[str, float]] | None
 
     def add_question(self, question: str, embedding: torch.Tensor) -> None:
         self.questions.append(question)
@@ -35,10 +36,8 @@ class QuestionClustering:
         self.threshold = threshold
         self.clusters = []
 
-    def get_embedding(self, question: str) -> torch.Tensor:
-        return self.model.encode(question, convert_to_tensor=True)
-
-    def get_nearest_cluster(self, embedding: torch.Tensor) -> Cluster | None:
+    def get_cluster(self, question: str) -> Cluster:
+        embedding = self.model.encode(question, convert_to_tensor=True)
         best_cluster, best_score = max(
             (
                 (cluster, util.cos_sim(embedding, cluster.centroid).item())
@@ -47,18 +46,15 @@ class QuestionClustering:
             key=itemgetter(1),
             default=(None, -1),
         )
-        return (
-            best_cluster
-            if best_cluster is not None and best_score >= self.threshold
-            else None
-        )
 
-    def add_cluster(
-        self,
-        question: str,
-        embedding: torch.Tensor,
-        likelihoods: dict[str, dict[str, float]],
-    ) -> None:
-        self.clusters.append(
-            Cluster(embedding, likelihoods, embedding.unsqueeze(0), [question])
+        if best_cluster is not None and best_score >= self.threshold:
+            return best_cluster
+
+        new_cluster = Cluster(
+            embedding,
+            embedding.unsqueeze(0),
+            [question],
+            None,
         )
+        self.clusters.append(new_cluster)
+        return new_cluster
