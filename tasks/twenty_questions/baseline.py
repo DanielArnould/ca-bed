@@ -1,14 +1,11 @@
 import re
 from textwrap import dedent
 from typing import override
-
 from node import EvidenceNode, QuestionNode
 from tasks.task import Task
 
 
 class Baseline(Task):
-    self_report: str
-
     def __init__(
         self,
         task_answer: str,
@@ -16,9 +13,7 @@ class Baseline(Task):
         max_lookahead_depth: int,
         max_conversation_depth: int,
         hypothesis_space: list[str],
-        self_report: str,
     ):
-        self.self_report = self_report
         super().__init__(
             task_answer,
             max_question_nodes,
@@ -30,11 +25,10 @@ class Baseline(Task):
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
+        return f"Twenty Questions (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=}"
 
     @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
-        prompt_parts = []
         history = []
         node = current_node
         while node.parent:
@@ -43,43 +37,45 @@ class Baseline(Task):
             history.append((question, answer))
             node = node.parent.parent
 
-        possible_diseases = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
-        prologue = (
-            dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
-               
-            The patient is suffering from one of the following possible diseases:      
-            {possible_diseases}
-    
-            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No', in order to find what disease this patient suffers from. 
-            Use the ongoing conversation for context to avoid redundant questions. 
-            """)
-            .format(self_report=self.self_report, possible_diseases=possible_diseases)
-            .strip()
-        )
-        prompt_parts.append(prologue)
+        prologue = dedent("""
+            You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
+            You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
+            Let us begin. Ask me the first question.
+            """).strip()
 
-        if history:
-            conversation_history = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
-            previous_questions_text = (
-                dedent("""\
-                These are the questions you've asked to the patient so far:
-                {history}
-                """)
-                .format(history=conversation_history)
-                .strip()
-            )
-            prompt_parts.append(previous_questions_text)
-
-        pruned_hypothesis_space = [
+        bullets_history = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
+        pruned_hypothesis = [
             item for item, prob in current_node.belief_state.items() if prob > 0
         ]
-        bullets_pruned_hypothesis = "\n".join(
-            f"- {item}" for item in pruned_hypothesis_space
-        )
+        bullets_pruned_hypothesis = "\n".join(f"- {item}" for item in pruned_hypothesis)
+
+        if len(bullets_history) == 0:
+            generation_prompt = (
+                dedent("""
+                Based on our current beliefs, the secret object is most likely one of the following items:
+                {belief}
+
+                Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+                Format your response in this structure:
+                1. <Question 1>
+                2. <Question 2>
+                ...
+                n. <Question n>
+                """)
+                .format(
+                    history=bullets_history,
+                    belief=bullets_pruned_hypothesis,
+                    num_questions=self.max_question_nodes,
+                )
+                .strip()
+            )
+
         generation_prompt = (
-            dedent("""\
-            Based on our current beliefs, the patient is most likely suffering from one of the following diseases:
+            dedent("""
+            The game has proceeded as follows:
+            {history}
+
+            Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
@@ -90,22 +86,19 @@ class Baseline(Task):
             n. <Question n>
             """)
             .format(
-                belief=bullets_pruned_hypothesis, num_questions=self.max_question_nodes
+                history=bullets_history,
+                belief=bullets_pruned_hypothesis,
+                num_questions=self.max_question_nodes,
             )
             .strip()
         )
-        prompt_parts.append(generation_prompt)
 
-        # TODO: Investigate effect of targeted questions
-        # if get_conversation_depth(current_node) >= 3:
-        #     target_prompt = dedent("""\
-        #         Note that you should point out and ask what disease the patient suffers from now.
-        #         Refer to the past conversation regarding the patient's symptoms. Never repeat previously asked questions.
-        #         The question must start with 'Are you suffering from ...'
-        #         """).strip()
-        #     prompt_parts.append(target_prompt)
+        # TODO: Investigate targeting prompts
+        # target_prompt = ""
+        # if get_conversation_depth(current_node) >= 14:
+        #     target_prompt = baseline_prompts.get_targeting_prompt()
 
-        return "\n\n".join(prompt_parts)
+        return f"{prologue}\n\n{generation_prompt}"
 
     @override
     def parse_question_generation_output(self, output: str) -> list[str]:
@@ -119,20 +112,18 @@ class Baseline(Task):
 
     @override
     def get_likelihood_elicitation_prompt(self, question: str) -> str:
-        hypothesis_space = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
+        items_str = "\n".join(f"- {x}" for x in self.hypothesis_space)
 
         return (
-            dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
-
-            Here are all the possible diseases that the patient may suffer from:
+            dedent("""
+            Here are all the X:
             {items_str}
 
-            Classify the disease based on this single yes/no question:
+            Classify the X based on this single yes/no question:
             Question: "{question}"
 
-            If the answer would be YES when the patient is indeed suffering from that disease, put it in YES; otherwise put it in NO.
-            Use the disease names exactly as listed. Cover all diseases exactly once (no omissions, no duplicates).
+            If the answer would be YES when that X is the secret object, put it in YES; otherwise put it in NO.
+            Use the item strings exactly as listed. Cover all items exactly once (no omissions, no duplicates).
 
             Return exactly in this format (no extra text, JUST WHAT I'M FORMATTING BELOW):
 
@@ -141,12 +132,8 @@ class Baseline(Task):
             Count of YES: <integer>
             NO: cccc, dddd, ...
             Count of NO: <integer>
-            """)
-            .format(
-                self_report=self.self_report,
-                items_str=hypothesis_space,
-                question=question,
-            )
+        """)
+            .format(items_str=items_str, question=question)
             .strip()
         )
 
@@ -169,10 +156,9 @@ class Baseline(Task):
     @override
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
-            dedent("""\
-            You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you up to 6 questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            Note that you must never reveal the disease until I tell it correctly. 
+            dedent("""
+            You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
+            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
             Let us begin. Here is my question:
             {question}
             """)
@@ -180,6 +166,7 @@ class Baseline(Task):
             .strip()
         )
 
+    @override
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
     ) -> EvidenceNode:

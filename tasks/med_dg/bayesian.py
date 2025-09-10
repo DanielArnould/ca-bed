@@ -4,7 +4,7 @@ from textwrap import dedent
 from typing import override
 
 from node import EvidenceNode, QuestionNode
-from ..task import Task
+from tasks.task import Task
 
 
 class Bayesian(Task):
@@ -32,7 +32,7 @@ class Bayesian(Task):
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Bayesian): Answer: {self.task_answer}, Self Report: {self.self_report}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
+        return f"MedDG (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.self_report=}"
 
     @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
