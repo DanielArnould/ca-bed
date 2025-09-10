@@ -18,13 +18,14 @@ class Cluster:
     def add_question(self, question: str, embedding: torch.Tensor) -> None:
         self.questions.append(question)
         self.embeddings = torch.cat([self.embeddings, embedding.unsqueeze(0)])
-        self.centroid = torch.mean(self.embeddings, dim=0)
+        # self.centroid = torch.mean(self.embeddings, dim=0)
 
 
 class QuestionClustering:
     clusters: list[Cluster]
     threshold: float
     model: SentenceTransformer
+    model_name: str
 
     def __init__(
         self, threshold: float, model_name: str = "quora-distilbert-multilingual"
@@ -32,7 +33,8 @@ class QuestionClustering:
         LOGGER.info(
             f"Setting up question cluster with model '{model_name}' and threshold '{threshold}'"
         )
-        self.model = SentenceTransformer(model_name)
+        self.model_name = model_name
+        self.model = SentenceTransformer(self.model_name)
         self.threshold = threshold
         self.clusters = []
 
@@ -48,8 +50,13 @@ class QuestionClustering:
         )
 
         if best_cluster is not None and best_score >= self.threshold:
+            LOGGER.info(
+                f"Cluster found for {question}. Adding to existing cluster of size {len(best_cluster.questions)}"
+            )
+            best_cluster.add_question(question, embedding)
             return best_cluster
 
+        LOGGER.info(f"Cluster not found for {question}. Creating new cluster...")
         new_cluster = Cluster(
             embedding,
             embedding.unsqueeze(0),
