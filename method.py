@@ -1,5 +1,4 @@
 import asyncio
-from collections import deque
 import copy
 from datetime import datetime
 from itertools import chain
@@ -7,7 +6,7 @@ import logging
 from history import RunHistory
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
-from question_clustering import QuestionClustering
+from question_clustering import Cluster, QuestionClustering
 from rewards import expected_reward
 from tasks.task import Task
 
@@ -82,9 +81,7 @@ class Method:
             tree_states=tree_states,
             final_path=final_path,
             final_answer=best_guess,
-            question_clusters=[
-                cluster.questions for cluster in self.question_clustering.clusters
-            ],
+            question_clustering=copy.deepcopy(self.question_clustering),
         )
 
     async def expand_evidence(
@@ -95,75 +92,90 @@ class Method:
         if current_depth >= task.max_lookahead_depth or not active:
             return
 
-        # Generate follow-up questions for all nodes on this level concurrently
-        prompts = [task.get_question_generation_prompt(node) for node in active]
-        outputs = await asyncio.gather(
-            *[call_llm(p, self.method_model) for p in prompts]
+        # Separate nodes that need questions from those that already have children
+        needs_questions = [node for node in active if not node.children]
+        next_level: list[QuestionNode] = list(
+            chain.from_iterable(node.children for node in active if node.children)
         )
-        new_questions = [
-            task.parse_question_generation_output(out.string) for out in outputs
-        ]
 
-        # Create questions nodes and build next level
-        next_level: list[QuestionNode] = []
-        for questions, parent in zip(new_questions, active):
-            new_question_nodes = [QuestionNode(q, parent) for q in questions]
-            parent.children.extend(new_question_nodes)
-            next_level.extend(new_question_nodes)
+        # Generate questions only for nodes without children
+        if needs_questions:
+            prompts = [
+                task.get_question_generation_prompt(node) for node in needs_questions
+            ]
+            outputs = await asyncio.gather(
+                *[call_llm(p, self.method_model) for p in prompts]
+            )
+            new_questions = [
+                task.parse_question_generation_output(out.string) for out in outputs
+            ]
 
-        await self.lookahead_when_at_question_node(next_level, task, current_depth)
+            # Create question nodes for nodes that needed them
+            for questions, parent in zip(new_questions, needs_questions):
+                new_question_nodes = [QuestionNode(q, parent) for q in questions]
+                parent.children.extend(new_question_nodes)
+                next_level.extend(new_question_nodes)
 
-    async def lookahead_when_at_question_node(
+        await self.expand_questions(next_level, task, current_depth)
+
+    async def expand_questions(
         self, level: list[QuestionNode], task: Task, current_depth: int
     ) -> None:
-        if not level:
-            return
-
-        # Get or create question clusters. If a new cluster is generated
-        # later questions in the same list may also join it
-        clusters = [
-            self.question_clustering.get_cluster(node.question) for node in level
-        ]
-        new_clusters = list(
-            set(cluster for cluster in clusters if cluster.likelihoods is None)
+        # Separate nodes that need evidence from those that already have children
+        needs_evidence = [node for node in level if not node.children]
+        next_level: list[EvidenceNode] = list(
+            chain.from_iterable(node.children for node in level if node.children)
         )
 
-        # Calculate likelihoods for new clusters concurrently
-        if new_clusters:
-            # Use the first question (the one that generated) the cluster
-            # as input to the likelihood elicitation for determinism
-            outputs = await asyncio.gather(
-                *[
-                    call_llm(
-                        task.get_likelihood_elicitation_prompt(c.questions[0]),
-                        self.method_model,
+        # Only process nodes that need evidence generation
+        if needs_evidence:
+            # Get or create question clusters for nodes that need evidence.
+            # New clusters are created sequentially, so items in the same list
+            # may join clusters created by previous items
+            clusters = [
+                self.question_clustering.get_cluster(node.question)
+                for node in needs_evidence
+            ]
+            seen_ids = set()
+            new_clusters: list[Cluster] = []
+            for cluster in clusters:
+                if cluster.likelihoods is None and id(cluster) not in seen_ids:
+                    seen_ids.add(id(cluster))
+                    new_clusters.append(cluster)
+
+            # Calculate likelihoods for new clusters concurrently
+            if new_clusters:
+                outputs = await asyncio.gather(
+                    *[
+                        call_llm(
+                            task.get_likelihood_elicitation_prompt(c.questions[0]),
+                            self.method_model,
+                        )
+                        for c in new_clusters
+                    ]
+                )
+
+                for output, cluster in zip(outputs, new_clusters):
+                    cluster.likelihoods = task.parse_likelihood_elicitation_output(
+                        output.string
                     )
-                    for c in new_clusters
-                ]
-            )
 
-            for output, cluster in zip(outputs, new_clusters):
-                cluster.likelihoods = task.parse_likelihood_elicitation_output(
-                    output.string
-                )
+            # Create evidence nodes for question nodes that needed them
+            for question_node, cluster in zip(needs_evidence, clusters):
+                assert cluster.likelihoods is not None, "Likelihoods missing!"
 
-        # Create evidence nodes and build next level
-        next_level: list[EvidenceNode] = []
-        for question_node, cluster in zip(level, clusters):
-            assert cluster.likelihoods is not None, "Likelihoods missing!"
-
-            for answer, likelihoods in cluster.likelihoods.items():
-                posterior, marginal = self.calculate_posterior(
-                    question_node.parent.belief_state, likelihoods
-                )
-                evidence_node = EvidenceNode(
-                    answer=answer,
-                    belief_state=posterior,
-                    marginal_likelihood=marginal,
-                    parent=question_node,
-                )
-                question_node.children.append(evidence_node)
-                next_level.append(evidence_node)
+                for answer, likelihoods in cluster.likelihoods.items():
+                    posterior, marginal = self.calculate_posterior(
+                        question_node.parent.belief_state, likelihoods
+                    )
+                    evidence_node = EvidenceNode(
+                        answer=answer,
+                        belief_state=posterior,
+                        marginal_likelihood=marginal,
+                        parent=question_node,
+                    )
+                    question_node.children.append(evidence_node)
+                    next_level.append(evidence_node)
 
         await self.expand_evidence(next_level, task, current_depth + 1)
 
