@@ -18,6 +18,7 @@ LOGGER = logging.getLogger("LLM Models")
 
 class Model(Enum):
     DEEPSEEK_CHAT = auto()
+    DEEPSEEK_CHAT_TOGETHER_AI = auto()
     DEEPSEEK_REASONER = auto()
     DUMMY = auto()
     GPT_4O_MINI = auto()
@@ -28,6 +29,13 @@ DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
 DEEPSEEK_CLIENT = (
     AsyncOpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
     if DEEPSEEK_KEY is not None
+    else None
+)
+
+TOGETHER_AI_KEY = os.getenv("TOGETHER_AI_KEY")
+TOGETHER_AI_CLIENT = (
+    AsyncOpenAI(api_key=TOGETHER_AI_KEY, base_url="https://api.together.xyz/v1")
+    if TOGETHER_AI_KEY is not None
     else None
 )
 
@@ -139,6 +147,28 @@ async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
     )
 
 
+async def _call_deepseek_chat_together_ai(input_text: str) -> LLMOutput:
+    assert TOGETHER_AI_CLIENT is not None, (
+        "TOGETHER_AI_CLIENT not setup (have you provided a key?)"
+    )
+    LOGGER.info(
+        f"Sending message to Deepseek V3.1 (Together AI): {input_text.replace('\n', '')}"
+    )
+
+    response = await TOGETHER_AI_CLIENT.chat.completions.create(
+        model="deepseek-ai/DeepSeek-V3.1",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=4096,
+        temperature=0.0,
+        stream=False,
+    )
+
+    LOGGER.info(f"Received response from Deepseek V3.1 (Together AI) {response}")
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
 async def call_llm(input_text: str, model: Model) -> LLMOutput:
     match model:
         case Model.DEEPSEEK_CHAT:
@@ -151,3 +181,5 @@ async def call_llm(input_text: str, model: Model) -> LLMOutput:
             return await _call_gpt_4o_mini(input_text)
         case Model.GPT_5_NANO:
             return await _call_gpt_5_nano(input_text)
+        case Model.DEEPSEEK_CHAT_TOGETHER_AI:
+            return await _call_deepseek_chat_together_ai(input_text)
