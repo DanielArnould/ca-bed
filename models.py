@@ -114,7 +114,6 @@ async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
     response = await OPENAI_CLIENT.chat.completions.create(
         model="gpt-4o-mini-2024-07-18",
         messages=[{"role": "user", "content": input_text}],
-        max_tokens=500,
         temperature=0.0,
         n=1,
     )

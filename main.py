@@ -14,8 +14,8 @@ from loggers import get_logger, setup_logger
 from method import Method
 from models import Model
 from tasks.task import Task
-from tasks.twenty_questions.data import COMMON
-from tasks.twenty_questions.tasks import Bayesian
+from tasks.craft_md.data import load_data
+from tasks.craft_md.baseline import Baseline
 
 
 def run_task(task: Task, model: Model):
@@ -44,24 +44,25 @@ def run_task(task: Task, model: Model):
 
 
 def main():
-    model = Model.DEEPSEEK_CHAT
+    model = Model.GPT_4O_MINI
+    craft_md, hypothesis_space = load_data()
     tasks = [
         Baseline(
-            task_answer=item,
+            craft_md_instance=item,
+            hypothesis_space=hypothesis_space,
             max_question_nodes=3,
             max_lookahead_depth=3,
-            max_conversation_depth=20,
-            confidence_threshold=0.7,
-            hypothesis_space=COMMON,
+            max_conversation_depth=6
         )
-        for item in COMMON[1:2]
+        for item in craft_md[0:1]
     ]
 
-    num_cores = multiprocessing.cpu_count()
-    with multiprocessing.Pool(
-        processes=num_cores,
-    ) as pool:
-        pool.starmap(run_task, [(task, model) for task in tasks])
+    run_task(tasks[0], model)
+    # num_cores = multiprocessing.cpu_count()
+    # with multiprocessing.Pool(
+    #     processes=num_cores,
+    # ) as pool:
+    #     pool.starmap(run_task, [(task, model) for task in tasks])
 
 
 if __name__ == "__main__":
