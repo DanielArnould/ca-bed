@@ -38,15 +38,12 @@ class Method:
 
     async def run(self, task: Task) -> RunHistory:
         start_time = datetime.now()
-        tree_states = []
         final_path = []
 
         current_node = self.root
+        final_path.append(str(current_node))
 
         while not self.is_terminal(current_node, task):
-            tree_states.append(copy.deepcopy(self.root))
-            final_path.append(str(current_node))
-
             await self.expand_evidence([current_node], task, 0)
             best_question_node = max(current_node.children, key=expected_reward)
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
@@ -61,8 +58,7 @@ class Method:
             LOGGER.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
             current_node = selected_evidence_node
 
-        tree_states.append(copy.deepcopy(self.root))
-        final_path.append(str(current_node))
+            final_path.append(str(current_node))
 
         best_guess = max(
             current_node.belief_state,
@@ -78,7 +74,7 @@ class Method:
             actual_answer=task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
-            tree_states=tree_states,
+            tree=copy.deepcopy(self.root),
             final_path=final_path,
             final_answer=best_guess,
             question_clustering=copy.deepcopy(self.question_clustering),
