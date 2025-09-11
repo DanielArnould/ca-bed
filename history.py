@@ -119,16 +119,22 @@ def serialise_run_history(history: RunHistory) -> dict:
     }
 
 
-def deserialise_run_history(history_dict: dict) -> RunHistory:
+def deserialise_run_history(
+    history_dict: dict,
+    include_tree: bool = False,
+    include_question_cluster: bool = False,
+) -> RunHistory:
     return RunHistory(
         task_info=history_dict["task_info"],
         actual_answer=history_dict["actual_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
-        tree=deserialise_tree(history_dict["tree"]),
+        tree=deserialise_tree(history_dict["tree"]) if include_tree else None,  # type: ignore
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
         question_clustering=deserialise_question_clustering(
             history_dict["question_clusters"]
-        ),
+        )
+        if include_question_cluster
+        else None,  # type: ignore
     )
