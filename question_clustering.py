@@ -10,15 +10,12 @@ LOGGER = logging.getLogger("Question Clustering")
 @dataclass
 class Cluster:
     centroid: torch.Tensor
-    embeddings: torch.Tensor
     questions: list[str]
     # Answer -> hypothesis -> likelihood
     likelihoods: dict[str, dict[str, float]] | None
 
-    def add_question(self, question: str, embedding: torch.Tensor) -> None:
+    def add_question(self, question: str) -> None:
         self.questions.append(question)
-        self.embeddings = torch.cat([self.embeddings, embedding.unsqueeze(0)])
-        # self.centroid = torch.mean(self.embeddings, dim=0)
 
 
 class QuestionClustering:
@@ -51,15 +48,14 @@ class QuestionClustering:
 
         if best_cluster is not None and best_score >= self.threshold:
             LOGGER.info(
-                f"Cluster found for {question}. Adding to existing cluster of size {len(best_cluster.questions)}"
+                f"Cluster found for {question}. Adding to existing cluster of size -1"
             )
-            best_cluster.add_question(question, embedding)
+            best_cluster.add_question(question)
             return best_cluster
 
         LOGGER.info(f"Cluster not found for {question}. Creating new cluster...")
         new_cluster = Cluster(
             embedding,
-            embedding.unsqueeze(0),
             [question],
             None,
         )
