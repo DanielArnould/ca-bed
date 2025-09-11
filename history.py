@@ -13,8 +13,7 @@ class RunHistory:
     actual_answer: str
     start_time: datetime
     end_time: datetime
-    # Deep copies of the root node at each iteration
-    tree_states: list[EvidenceNode]
+    tree: EvidenceNode
     final_path: list[str]
     final_answer: str
     question_clustering: QuestionClustering
@@ -76,7 +75,6 @@ def serialise_question_clustering(clustering: QuestionClustering) -> dict:
     serialised_clusters = [
         {
             "centroid": cluster.centroid.cpu().numpy().tolist(),
-            "embeddings": cluster.embeddings.cpu().numpy().tolist(),
             "questions": cluster.questions,
             "likelihoods": cluster.likelihoods,
         }
@@ -97,12 +95,10 @@ def deserialise_question_clustering(qc_dict: dict) -> QuestionClustering:
 
     for cluster_dict in qc_dict["clusters"]:
         centroid = torch.tensor(cluster_dict["centroid"], dtype=torch.float32)
-        embeddings = torch.tensor(cluster_dict["embeddings"], dtype=torch.float32)
 
         cluster = Cluster(
             centroid=centroid,
-            embeddings=embeddings,
-            questions=cluster_dict["questions"],
+            questions=[cluster_dict["questions"]],
             likelihoods=cluster_dict["likelihoods"],
         )
         clustering.clusters.append(cluster)
@@ -111,7 +107,7 @@ def deserialise_question_clustering(qc_dict: dict) -> QuestionClustering:
 
 
 def serialise_run_history(history: RunHistory) -> dict:
-    history_dict = {
+    return {
         "task_info": history.task_info,
         "actual_answer": history.actual_answer,
         "start_time": history.start_time.isoformat(),
@@ -119,11 +115,8 @@ def serialise_run_history(history: RunHistory) -> dict:
         "final_path": history.final_path,
         "final_answer": history.final_answer,
         "question_clusters": serialise_question_clustering(history.question_clustering),
+        "tree": serialise_tree(history.tree),
     }
-
-    history_dict["tree_states"] = [serialise_tree(tree) for tree in history.tree_states]
-
-    return history_dict
 
 
 def deserialise_run_history(history_dict: dict) -> RunHistory:
@@ -132,9 +125,7 @@ def deserialise_run_history(history_dict: dict) -> RunHistory:
         actual_answer=history_dict["actual_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
-        tree_states=[
-            deserialise_tree(tree_data) for tree_data in history_dict["tree_states"]
-        ],
+        tree=deserialise_tree(history_dict["tree"]),
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
         question_clustering=deserialise_question_clustering(
