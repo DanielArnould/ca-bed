@@ -69,15 +69,17 @@ class Method:
             f"Completed run! Best guess: {best_guess}, Target: {task.task_answer}"
         )
 
+        # UNSAFE RETURN, since tree and question clustering could be mutated
+        # Voyager has issues being deepcopied though
         return RunHistory(
             task_info=str(task),
             actual_answer=task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
-            tree=copy.deepcopy(self.root),
+            tree=self.root,
             final_path=final_path,
             final_answer=best_guess,
-            question_clustering=copy.deepcopy(self.question_clustering),
+            question_clustering=self.question_clustering,
         )
 
     async def expand_evidence(
@@ -144,7 +146,7 @@ class Method:
                 outputs = await asyncio.gather(
                     *[
                         call_llm(
-                            task.get_likelihood_elicitation_prompt(c.questions[0]),
+                            task.get_likelihood_elicitation_prompt(c.centroid_question),
                             self.method_model,
                         )
                         for c in new_clusters

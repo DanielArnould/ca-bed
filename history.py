@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-import torch
-
 from node import EvidenceNode, QuestionNode
 from question_clustering import Cluster, QuestionClustering
 
@@ -72,36 +70,31 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
 
 
 def serialise_question_clustering(clustering: QuestionClustering) -> dict:
-    serialised_clusters = [
-        {
-            "centroid": cluster.centroid.cpu().numpy().tolist(),
+    serialised_clusters = {
+        key: {
+            "centroid_question": cluster.centroid_question,
             "questions": cluster.questions,
             "likelihoods": cluster.likelihoods,
         }
-        for cluster in clustering.clusters
-    ]
+        for key, cluster in clustering.clusters.items()
+    }
 
     return {
-        "model_name": clustering.model_name,
         "threshold": clustering.threshold,
         "clusters": serialised_clusters,
     }
 
 
 def deserialise_question_clustering(qc_dict: dict) -> QuestionClustering:
-    clustering = QuestionClustering(
-        threshold=qc_dict["threshold"], model_name=qc_dict["model_name"]
-    )
+    clustering = QuestionClustering(threshold=qc_dict["threshold"])
 
-    for cluster_dict in qc_dict["clusters"]:
-        centroid = torch.tensor(cluster_dict["centroid"], dtype=torch.float32)
-
+    for key, cluster_dict in qc_dict["clusters"].items():
         cluster = Cluster(
-            centroid=centroid,
-            questions=[cluster_dict["questions"]],
+            centroid_question=cluster_dict["centroid_question"],
+            questions=cluster_dict["questions"],
             likelihoods=cluster_dict["likelihoods"],
         )
-        clustering.clusters.append(cluster)
+        clustering.clusters[key] = cluster
 
     return clustering
 

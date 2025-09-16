@@ -1,63 +1,60 @@
 from dataclasses import dataclass
 import logging
-from operator import itemgetter
-from sentence_transformers import SentenceTransformer, util
-import torch
+from sentence_transformers import SentenceTransformer
+from voyager import Index, Space
 
 LOGGER = logging.getLogger("Question Clustering")
 
 
 @dataclass
 class Cluster:
-    centroid: torch.Tensor
-    questions: list[str]
+    centroid_question: str
+    questions: dict[str, int]
     # Answer -> hypothesis -> likelihood
     likelihoods: dict[str, dict[str, float]] | None
 
     def add_question(self, question: str) -> None:
-        self.questions.append(question)
+        self.questions[question] = self.questions.get(question, 0) + 1
 
 
 class QuestionClustering:
-    clusters: list[Cluster]
+    index: Index
+    clusters: dict[int, Cluster]
     threshold: float
     model: SentenceTransformer
-    model_name: str
 
     def __init__(
-        self, threshold: float, model_name: str = "quora-distilbert-multilingual"
+        self,
+        threshold: float,
     ):
-        LOGGER.info(
-            f"Setting up question cluster with model '{model_name}' and threshold '{threshold}'"
-        )
-        self.model_name = model_name
-        self.model = SentenceTransformer(self.model_name)
+        LOGGER.info(f"Setting up question cluster with threshold '{threshold}'")
+        self.model = SentenceTransformer("quora-distilbert-multilingual")
+        self.index = Index(Space.Cosine, num_dimensions=768)
         self.threshold = threshold
-        self.clusters = []
+        self.clusters = {}
 
     def get_cluster(self, question: str) -> Cluster:
-        embedding = self.model.encode(question, convert_to_tensor=True)
-        best_cluster, best_score = max(
-            (
-                (cluster, util.cos_sim(embedding, cluster.centroid).item())
-                for cluster in self.clusters
-            ),
-            key=itemgetter(1),
-            default=(None, -1),
+        embedding = self.model.encode(
+            question, convert_to_numpy=True, normalize_embeddings=False
+        )
+        neighbours, distances = (
+            self.index.query(embedding, k=1) if len(self.clusters) >= 1 else ([], [])
         )
 
-        if best_cluster is not None and best_score >= self.threshold:
+        if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
+            best_cluster = self.clusters[neighbours[0]]
             LOGGER.info(
-                f"Cluster found for {question}. Adding to existing cluster of size -1"
+                f"Cluster found for {question}, with similarity {1 - distances[0]}!"
             )
             best_cluster.add_question(question)
             return best_cluster
 
         LOGGER.info(f"Cluster not found for {question}. Creating new cluster...")
+        idx = self.index.add_item(embedding)
         new_cluster = Cluster(
-            embedding,
-            [question],
+            question,
+            {question: 1},
             None,
         )
-        self.clusters.append(new_cluster)
+        self.clusters[idx] = new_cluster
         return new_cluster

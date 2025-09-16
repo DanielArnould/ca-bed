@@ -28,18 +28,12 @@ def main():
         force=True,
     )
 
-    benchmark_model = Model.GPT_4O_MINI
-    method_model = Model.GPT_4O_MINI
+    benchmark_model = Model.DEEPSEEK_CHAT
+    method_model = Model.DEEPSEEK_CHAT
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
     question_clustering = QuestionClustering(threshold=0.99)
-    initial_belief_state = get_uniform_belief_state(MED_DG_SET)
-
-    method = Method(
-        benchmark_model, method_model, question_clustering, initial_belief_state
-    )
 
     dataset = load_data()
-    subset = dataset[:50]
 
     tasks = [
         Bayesian(
@@ -51,7 +45,7 @@ def main():
             confidence_threshold=0.7,
             self_report=item.self_report,
         )
-        for item in subset
+        for item in dataset
     ]
 
     for i, task in enumerate(tasks):
@@ -64,12 +58,18 @@ def main():
             ],
             force=True,
         )
+        initial_belief_state = get_uniform_belief_state(MED_DG_SET)
+
+        method = Method(
+            benchmark_model, method_model, question_clustering, initial_belief_state
+        )
         history = asyncio.run(method.run(task))
         run_history_path = output_dir / f"{i}.json"
 
         LOGGER.info(f"Completed run, saving output to {run_history_path}")
         with run_history_path.open("w") as f:
             json.dump(serialise_run_history(history), f)
+        question_clustering.index.save(f"logs/{i}.voy")
 
         LOGGER.info(f"Run saved to {run_history_path}")
 
