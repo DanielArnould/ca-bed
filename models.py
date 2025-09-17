@@ -23,6 +23,9 @@ class Model(Enum):
     DUMMY = auto()
     GPT_4O_MINI = auto()
     GPT_5_NANO = auto()
+    LLAMA_4_SCOUT = auto()
+    LLAMA_3_3 = auto()
+    QWEN_14B = auto()
 
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
@@ -160,6 +163,7 @@ async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
     )
 
 
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
 async def _call_deepseek_chat_together_ai(input_text: str) -> LLMOutput:
     assert TOGETHER_AI_CLIENT is not None, (
         "TOGETHER_AI_CLIENT not setup (have you provided a key?)"
@@ -185,6 +189,91 @@ async def _call_deepseek_chat_together_ai(input_text: str) -> LLMOutput:
     )
 
 
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
+async def _call_llama_4_scout(input_text: str) -> LLMOutput:
+    assert TOGETHER_AI_CLIENT is not None, (
+        "TOGETHER_AI_CLIENT not setup (have you provided a key?)"
+    )
+    LOGGER.info(
+        f"Sending message to Llama 4 Scout (Together AI): {input_text.replace('\n', '')}"
+    )
+
+    response = await TOGETHER_AI_CLIENT.chat.completions.create(
+        model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=4096,
+        temperature=0,
+        n=1,
+        stream=False,
+    )
+
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
+
+    LOGGER.info(f"Received response from Llama 4 Scout (Together AI) {response}")
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
+async def _call_llama_3_3(input_text: str) -> LLMOutput:
+    assert TOGETHER_AI_CLIENT is not None, (
+        "TOGETHER_AI_CLIENT not setup (have you provided a key?)"
+    )
+    LOGGER.info(
+        f"Sending message to Llama 3.3 70B Instruct (Together AI): {input_text.replace('\n', '')}"
+    )
+
+    response = await TOGETHER_AI_CLIENT.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=4096,
+        temperature=0,
+        n=1,
+        stream=False,
+    )
+
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
+
+    LOGGER.info(
+        f"Received response from Llama 3.3 70B Instruct (Together AI) {response}"
+    )
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
+async def _call_qwen_14b(input_text: str) -> LLMOutput:
+    assert TOGETHER_AI_CLIENT is not None, (
+        "TOGETHER_AI_CLIENT not setup (have you provided a key?)"
+    )
+    LOGGER.info(
+        f"Sending message to Deepseek R1 Distilled Qwen 14B (Together AI): {input_text.replace('\n', '')}"
+    )
+
+    response = await TOGETHER_AI_CLIENT.chat.completions.create(
+        model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        messages=[{"role": "user", "content": input_text}],
+        max_tokens=4096,
+        temperature=0,
+        n=1,
+        stream=False,
+    )
+
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
+
+    LOGGER.info(
+        f"Received response from Deepseek R1 Distilled Qwen 14B (Together AI) {response}"
+    )
+    return LLMOutput(
+        string=response.choices[0].message.content,  # type: ignore
+    )
+
+
 async def call_llm(input_text: str, model: Model) -> LLMOutput:
     match model:
         case Model.DEEPSEEK_CHAT:
@@ -199,3 +288,9 @@ async def call_llm(input_text: str, model: Model) -> LLMOutput:
             return await _call_gpt_5_nano(input_text)
         case Model.DEEPSEEK_CHAT_TOGETHER_AI:
             return await _call_deepseek_chat_together_ai(input_text)
+        case Model.LLAMA_4_SCOUT:
+            return await _call_llama_4_scout(input_text)
+        case Model.LLAMA_3_3:
+            return await _call_llama_3_3(input_text)
+        case Model.QWEN_14B:
+            return await _call_qwen_14b(input_text)
