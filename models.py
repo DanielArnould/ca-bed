@@ -44,6 +44,15 @@ OPENAI_CLIENT = AsyncOpenAI(api_key=OPENAI_KEY) if OPENAI_KEY is not None else N
 
 
 @dataclass
+class TokenCounter:
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
+
+TOKEN_COUNTER = TokenCounter()
+
+
+@dataclass
 class Token:
     string: str
     bytes: list[int]
@@ -57,6 +66,7 @@ class LLMOutput:
     reasoning: str | None = None
 
 
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
 async def _call_deepseek_chat(input_text: str) -> LLMOutput:
     assert DEEPSEEK_CLIENT is not None, (
         "DEEPSEEK_CLIENT not setup (have you provided a key?)"
@@ -71,6 +81,9 @@ async def _call_deepseek_chat(input_text: str) -> LLMOutput:
         temperature=0.0,  # UoT does not specify a temperature, but their repo suggests 0.0
         stream=False,
     )
+
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
 
     LOGGER.info(f"Received response from Deepseek Chat {response}")
     return LLMOutput(
@@ -162,6 +175,9 @@ async def _call_deepseek_chat_together_ai(input_text: str) -> LLMOutput:
         temperature=0.0,
         stream=False,
     )
+
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
 
     LOGGER.info(f"Received response from Deepseek V3.1 (Together AI) {response}")
     return LLMOutput(

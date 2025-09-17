@@ -173,5 +173,5 @@ class Bayesian(Task):
                 return child
 
         assert False, (
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
+            f"No matching answer selected for question: {question_node.question}. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )

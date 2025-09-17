@@ -14,7 +14,6 @@ class RunHistory:
     tree: EvidenceNode
     final_path: list[str]
     final_answer: str
-    question_clustering: QuestionClustering
 
 
 def serialise_tree(root: EvidenceNode) -> dict:
@@ -72,26 +71,23 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
 def serialise_question_clustering(clustering: QuestionClustering) -> dict:
     serialised_clusters = {
         key: {
-            "centroid_question": cluster.centroid_question,
-            "questions": cluster.questions,
+            "size": cluster.size,
             "likelihoods": cluster.likelihoods,
         }
         for key, cluster in clustering.clusters.items()
     }
 
     return {
-        "threshold": clustering.threshold,
         "clusters": serialised_clusters,
     }
 
 
 def deserialise_question_clustering(qc_dict: dict) -> QuestionClustering:
-    clustering = QuestionClustering(threshold=qc_dict["threshold"])
+    clustering = QuestionClustering()
 
     for key, cluster_dict in qc_dict["clusters"].items():
         cluster = Cluster(
-            centroid_question=cluster_dict["centroid_question"],
-            questions=cluster_dict["questions"],
+            size=cluster_dict["size"],
             likelihoods=cluster_dict["likelihoods"],
         )
         clustering.clusters[key] = cluster
@@ -107,7 +103,6 @@ def serialise_run_history(history: RunHistory) -> dict:
         "end_time": history.end_time.isoformat(),
         "final_path": history.final_path,
         "final_answer": history.final_answer,
-        "question_clusters": serialise_question_clustering(history.question_clustering),
         "tree": serialise_tree(history.tree),
     }
 
@@ -115,7 +110,6 @@ def serialise_run_history(history: RunHistory) -> dict:
 def deserialise_run_history(
     history_dict: dict,
     include_tree: bool = False,
-    include_question_cluster: bool = False,
 ) -> RunHistory:
     return RunHistory(
         task_info=history_dict["task_info"],
@@ -125,9 +119,4 @@ def deserialise_run_history(
         tree=deserialise_tree(history_dict["tree"]) if include_tree else None,  # type: ignore
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
-        question_clustering=deserialise_question_clustering(
-            history_dict["question_clusters"]
-        )
-        if include_question_cluster
-        else None,  # type: ignore
     )

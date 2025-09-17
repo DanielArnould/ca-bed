@@ -1,60 +1,36 @@
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 import logging
-from sentence_transformers import SentenceTransformer
-from voyager import Index, Space
 
 LOGGER = logging.getLogger("Question Clustering")
 
 
 @dataclass
 class Cluster:
-    centroid_question: str
-    questions: dict[str, int]
+    size: int
     # Answer -> hypothesis -> likelihood
     likelihoods: dict[str, dict[str, float]] | None
-
-    def add_question(self, question: str) -> None:
-        self.questions[question] = self.questions.get(question, 0) + 1
+    lock: asyncio.Lock = field(default_factory=lambda: asyncio.Lock())
 
 
 class QuestionClustering:
-    index: Index
-    clusters: dict[int, Cluster]
-    threshold: float
-    model: SentenceTransformer
+    clusters: dict[str, Cluster]
 
-    def __init__(
-        self,
-        threshold: float,
-    ):
-        LOGGER.info(f"Setting up question cluster with threshold '{threshold}'")
-        self.model = SentenceTransformer("quora-distilbert-multilingual")
-        self.index = Index(Space.Cosine, num_dimensions=768)
-        self.threshold = threshold
+    def __init__(self):
+        LOGGER.info("Setting up question cluster...")
         self.clusters = {}
 
     def get_cluster(self, question: str) -> Cluster:
-        embedding = self.model.encode(
-            question, convert_to_numpy=True, normalize_embeddings=False
-        )
-        neighbours, distances = (
-            self.index.query(embedding, k=1) if len(self.clusters) >= 1 else ([], [])
-        )
+        cluster = self.clusters.get(question)
 
-        if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
-            best_cluster = self.clusters[neighbours[0]]
+        if cluster is not None:
             LOGGER.info(
-                f"Cluster found for {question}, with similarity {1 - distances[0]}!"
+                f"Cluster found for {question}. Adding to existing cluster of size {cluster.size}"
             )
-            best_cluster.add_question(question)
-            return best_cluster
+            cluster.size += 1
+            return cluster
 
         LOGGER.info(f"Cluster not found for {question}. Creating new cluster...")
-        idx = self.index.add_item(embedding)
-        new_cluster = Cluster(
-            question,
-            {question: 1},
-            None,
-        )
-        self.clusters[idx] = new_cluster
+        new_cluster = Cluster(1, None)
+        self.clusters[question] = new_cluster
         return new_cluster
