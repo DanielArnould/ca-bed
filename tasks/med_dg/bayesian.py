@@ -83,6 +83,7 @@ class Bayesian(Task):
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            ONLY ASK YES/NO QUESTIONS.
             Format your response in this structure:
             1. <Question 1>
             2. <Question 2>
@@ -112,7 +113,7 @@ class Bayesian(Task):
 
         return (
             dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            You are an expert medical doctor. 
             You need to estimate the probability of a "Yes" answer for a list of different potential diseases a patient is suffering from, given a single question.
 
             The question is:
@@ -145,7 +146,7 @@ class Bayesian(Task):
     def parse_likelihood_elicitation_output(
         self, output: str
     ) -> dict[str, dict[str, float]]:
-        cleaned_output = output[output.find("{") : output.rfind("}") + 1]
+        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
         probs = json.loads(cleaned_output)
         return {"Yes": probs, "No": {item: 1 - prob for item, prob in probs.items()}}
 
