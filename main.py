@@ -33,13 +33,13 @@ async def main() -> None:
         force=True,
     )
 
-    benchmark_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
-    method_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
+    benchmark_model = Model.LLAMA_3_3
+    method_model = Model.LLAMA_3_3
     token_counter = TOKEN_COUNTER
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    with open("logs/20250917133204/pre_119_cluster.json", "r") as f:
-        question_clustering = deserialise_question_clustering(json.load(f))
-    # question_clustering = QuestionClustering()
+    # with open("logs/20250917223251/pre_009_cluster.json", "r") as f:
+    #     question_clustering = deserialise_question_clustering(json.load(f))
+    question_clustering = QuestionClustering()
 
     dataset = load_data()
 
@@ -53,10 +53,10 @@ async def main() -> None:
             confidence_threshold=0.7,
             self_report=item.self_report,
         )
-        for item in dataset[119:247]
+        for item in dataset[:16]
     ]
 
-    max_concurrent = 1
+    max_concurrent = 16
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def run_sample_with_semaphore(idx: int, task: Task) -> None:
@@ -85,7 +85,7 @@ async def main() -> None:
             )
 
     await asyncio.gather(
-        *[run_sample_with_semaphore(i, task) for i, task in enumerate(tasks, start=119)]
+        *[run_sample_with_semaphore(i, task) for i, task in enumerate(tasks)]
     )
 
     with (output_dir / "final_cluster.json").open("w") as f:
@@ -93,4 +93,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    for _ in range(4):
+        asyncio.run(main())
