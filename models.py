@@ -139,6 +139,9 @@ async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
         n=1,
     )
 
+    TOKEN_COUNTER.total_input_tokens += response.usage.prompt_tokens  # type: ignore
+    TOKEN_COUNTER.total_output_tokens += response.usage.completion_tokens  # type: ignore
+
     LOGGER.info(f"Received response from gpt-4o-mini {response}")
     return LLMOutput(
         string=response.choices[0].message.content,  # type: ignore

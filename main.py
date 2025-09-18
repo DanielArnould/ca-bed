@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 
 from history import (
-    deserialise_question_clustering,
     serialise_question_clustering,
     serialise_run_history,
 )
@@ -13,7 +12,7 @@ from method import Method, get_uniform_belief_state
 from models import TOKEN_COUNTER, Model
 from question_clustering import QuestionClustering
 from tasks.med_dg.bayesian import Bayesian
-from tasks.med_dg.data import MED_DG_SET, load_data
+from tasks.med_dg.data import MED_DG_SET, load_data, load_data_even
 from tasks.task import Task
 
 LOGGER = logging.getLogger("Main")
@@ -39,9 +38,9 @@ async def main() -> None:
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
     # with open("logs/20250917223251/pre_009_cluster.json", "r") as f:
     #     question_clustering = deserialise_question_clustering(json.load(f))
-    question_clustering = QuestionClustering()
+    question_clustering = QuestionClustering(0.99)
 
-    dataset = load_data()
+    dataset = load_data_even(0.3)
 
     tasks = [
         Bayesian(
@@ -53,20 +52,14 @@ async def main() -> None:
             confidence_threshold=0.7,
             self_report=item.self_report,
         )
-        for item in dataset[:16]
+        for item in dataset
     ]
 
-    max_concurrent = 16
+    max_concurrent = 8
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def run_sample_with_semaphore(idx: int, task: Task) -> None:
         async with semaphore:
-            question_clustering_path = output_dir / f"pre_{idx:03d}_cluster.json"
-            run_history_path = output_dir / f"{idx:03d}_run.json"
-
-            with question_clustering_path.open("w") as f:
-                json.dump(serialise_question_clustering(question_clustering), f)
-
             method = Method(
                 benchmark_model,
                 method_model,
@@ -75,11 +68,21 @@ async def main() -> None:
             )
             history = await method.run(task)
 
-            LOGGER.info(f"Completed run, saving output to {run_history_path}")
+            LOGGER.info(f"Completed run, saving output to {output_dir}")
+            question_clustering_path_json = output_dir / f"{idx:03d}_cluster.json"
+            question_clustering_path_voyager = output_dir / f"{idx:03d}_cluster.voy"
+
+            serialise_question_clustering(
+                question_clustering,
+                question_clustering_path_json,
+                question_clustering_path_voyager,
+            )
+
+            run_history_path = output_dir / f"{idx:03d}_run.json"
             with run_history_path.open("w") as f:
                 json.dump(serialise_run_history(history), f)
 
-            LOGGER.info(f"Run saved to {run_history_path}")
+            LOGGER.info(f"Run saved to {output_dir}")
             LOGGER.info(
                 f"{token_counter.total_input_tokens=} {token_counter.total_output_tokens=}"
             )
@@ -88,10 +91,12 @@ async def main() -> None:
         *[run_sample_with_semaphore(i, task) for i, task in enumerate(tasks)]
     )
 
-    with (output_dir / "final_cluster.json").open("w") as f:
-        json.dump(serialise_question_clustering(question_clustering), f)
+    serialise_question_clustering(
+        question_clustering,
+        output_dir / "final_cluster.json",
+        output_dir / "final_cluster.voy",
+    )
 
 
 if __name__ == "__main__":
-    for _ in range(4):
-        asyncio.run(main())
+    asyncio.run(main())

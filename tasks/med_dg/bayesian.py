@@ -83,7 +83,7 @@ class Bayesian(Task):
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
-            ONLY ASK YES/NO QUESTIONS.
+            ONLY ASK QUESTIONS WHERE THE ANSWER IS YES OR NO.
             Format your response in this structure:
             1. <Question 1>
             2. <Question 2>
@@ -156,7 +156,7 @@ class Bayesian(Task):
             dedent("""\
             You are the patient suffering from {target_item}, and I am the doctor. 
             I will ask you up to 6 questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            Note that you must never reveal the disease until I tell it correctly. 
+            Note that you must never reveal the disease until I tell it correctly. ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)

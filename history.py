@@ -1,8 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
+import json
+from pathlib import Path
 
 from node import EvidenceNode, QuestionNode
 from question_clustering import Cluster, QuestionClustering
+
+from voyager import Index
 
 
 @dataclass
@@ -68,29 +72,43 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
     return _deserialise(serialised_tree, parent=None)  # type: ignore
 
 
-def serialise_question_clustering(clustering: QuestionClustering) -> dict:
+def serialise_question_clustering(
+    clustering: QuestionClustering, json_path: Path, voyager_path: Path
+) -> None:
     serialised_clusters = {
         key: {
-            "size": cluster.size,
+            "questions": cluster.questions,
             "likelihoods": cluster.likelihoods,
         }
         for key, cluster in clustering.clusters.items()
     }
 
-    return {
-        "clusters": serialised_clusters,
-    }
+    json_cluster = {"clusters": serialised_clusters, "threshold": clustering.threshold}
+
+    with json_path.open("w") as f:
+        json.dump(json_cluster, f)
+
+    clustering.index.save(str(voyager_path))
 
 
-def deserialise_question_clustering(qc_dict: dict) -> QuestionClustering:
-    clustering = QuestionClustering()
+def deserialise_question_clustering(
+    json_path: Path, voyager_path: Path
+) -> QuestionClustering:
+    clustering = QuestionClustering(threshold=-1)
+
+    with json_path.open("r") as f:
+        qc_dict = json.load(f)
+
+    clustering.threshold = qc_dict["threshold"]
 
     for key, cluster_dict in qc_dict["clusters"].items():
         cluster = Cluster(
-            size=cluster_dict["size"],
+            questions=cluster_dict["questions"],
             likelihoods=cluster_dict["likelihoods"],
         )
         clustering.clusters[key] = cluster
+
+    clustering.index = clustering.index.load(str(voyager_path))
 
     return clustering
 
