@@ -16,6 +16,8 @@ class Method:
     method_model: Model
     question_clustering: QuestionClustering
     root: EvidenceNode
+    total_input_tokens: int
+    total_output_tokens: int
 
     def __init__(
         self,
@@ -32,6 +34,7 @@ class Method:
             belief_state=initial_belief_state,
             marginal_likelihood=1.0,
         )
+        self.total_input_tokens = self.total_output_tokens = 0
         LOGGER.info(f"Created root node: {str(self.root)}")
 
     async def run(self, task: Task) -> RunRecord:
@@ -49,7 +52,11 @@ class Method:
 
             selection_prompt = task.get_answer_selection_prompt(best_question_node)
             LOGGER.info("Posing question to Benchmark LLM...")
-            selection_output = await call_llm(selection_prompt, self.benchmark_model)
+            selection_output, input_tokens, output_tokens = await call_llm(
+                selection_prompt, self.benchmark_model
+            )
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
             selected_evidence_node = task.parse_answer_selection_output(
                 selection_output, best_question_node
             )
@@ -72,6 +79,8 @@ class Method:
             true_answer=task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
+            total_input_tokens=self.total_input_tokens,
+            total_output_tokens=self.total_output_tokens,
             serialised_tree=serialise_tree(self.root),
             final_path=final_path,
             final_answer=best_guess,
@@ -85,7 +94,11 @@ class Method:
 
         if not curr.children:
             prompt = task.get_question_generation_prompt(curr)
-            output = await call_llm(prompt, self.method_model)
+            output, input_tokens, output_tokens = await call_llm(
+                prompt, self.method_model
+            )
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
             new_questions = task.parse_question_generation_output(output)
             new_question_nodes = [QuestionNode(q, curr) for q in new_questions]
             curr.children.extend(new_question_nodes)
@@ -105,10 +118,12 @@ class Method:
 
             async with cluster.lock:
                 if cluster.likelihoods is None:
-                    output = await call_llm(
+                    output, input_tokens, output_tokens = await call_llm(
                         task.get_likelihood_elicitation_prompt(curr.question),
                         self.benchmark_model,
                     )
+                    self.total_input_tokens += input_tokens
+                    self.total_output_tokens += output_tokens
                     cluster.likelihoods = task.parse_likelihood_elicitation_output(
                         output
                     )

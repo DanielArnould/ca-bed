@@ -46,10 +46,12 @@ class Model(Enum):
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
-async def call_llm(input_text: str, model: Model) -> str:
+async def call_llm(input_text: str, model: Model) -> tuple[str, int, int]:
+    """Returns (response, prompt token count, completion token count)"""
+
     if model == Model.DUMMY:
         print(f"[DUMMY LLM]: {input_text}")
-        return input("Enter a response: ")
+        return input("Enter a response: "), 0, 0
 
     client_key, model_id = model.value
     client = CLIENTS[client_key]
@@ -69,9 +71,9 @@ async def call_llm(input_text: str, model: Model) -> str:
         stream=False,
     )
 
-    global INPUT_TOKEN_COUNT, OUTPUT_TOKEN_COUNT
-    INPUT_TOKEN_COUNT += response.usage.prompt_tokens  # type: ignore
-    OUTPUT_TOKEN_COUNT += response.usage.completion_tokens  # type: ignore
-
     LOGGER.info(f"Received response from {model_id}: '{response}'")
-    return response.choices[0].message.content  # type: ignore
+    return (
+        response.choices[0].message.content,  # type: ignore
+        response.usage.prompt_tokens,  # type: ignore
+        response.usage.completion_tokens,  # type: ignore
+    )

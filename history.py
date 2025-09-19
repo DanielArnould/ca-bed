@@ -13,6 +13,8 @@ class RunRecord:
     true_answer: str
     start_time: datetime
     end_time: datetime
+    total_input_tokens: int
+    total_output_tokens: int
     final_path: list[str]
     final_answer: str
     serialised_tree: dict | None
@@ -115,6 +117,8 @@ def serialise_run_record(history: RunRecord) -> dict:
         "true_answer": history.true_answer,
         "start_time": history.start_time.isoformat(),
         "end_time": history.end_time.isoformat(),
+        "total_input_tokens": history.total_input_tokens,
+        "total_output_tokens": history.total_output_tokens,
         "final_path": history.final_path,
         "final_answer": history.final_answer,
         "tree": history.serialised_tree,
@@ -130,6 +134,8 @@ def deserialise_run_record(
         true_answer=history_dict["true_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
+        total_input_tokens=history_dict["total_input_tokens"],
+        total_output_tokens=history_dict["total_output_tokens"],
         serialised_tree=history_dict["tree"] if include_tree else None,
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
