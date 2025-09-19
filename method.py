@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from functools import partial
 import logging
 from history import RunRecord, serialise_tree
 from models import Model, call_llm
@@ -14,6 +15,8 @@ LOGGER = logging.getLogger(__name__)
 class Method:
     benchmark_model: Model
     method_model: Model
+    sharpness_constant: float
+    task: Task
     question_clustering: QuestionClustering
     root: EvidenceNode
     total_input_tokens: int
@@ -23,41 +26,49 @@ class Method:
         self,
         benchmark_model: Model,
         method_model: Model,
+        sharpness_constant: float,
+        task: Task,
         question_clustering: QuestionClustering,
-        initial_belief_state: dict[str, float],
     ):
         self.benchmark_model = benchmark_model
         self.method_model = method_model
+        self.sharpness_constant = sharpness_constant
+        self.task = task
         self.question_clustering = question_clustering
         self.root = EvidenceNode(
             answer="ROOT",
-            belief_state=initial_belief_state,
+            belief_state=get_uniform_belief_state(task.hypothesis_space),
             marginal_likelihood=1.0,
         )
         self.total_input_tokens = self.total_output_tokens = 0
         LOGGER.info(f"Created root node: {str(self.root)}")
 
-    async def run(self, task: Task) -> RunRecord:
+    async def run(self) -> RunRecord:
         start_time = datetime.now()
         final_path = []
 
         current_node = self.root
         final_path.append(str(current_node))
 
-        while not self.is_terminal(current_node, task):
-            await self.expand_evidence(current_node, task, 0)
-            best_question_node = max(current_node.children, key=expected_reward)
+        while not self.is_terminal(current_node):
+            await self.expand_evidence(current_node, 0)
+            best_question_node = max(
+                current_node.children,
+                key=partial(
+                    expected_reward, sharpness_constant=self.sharpness_constant
+                ),
+            )
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
-            selection_prompt = task.get_answer_selection_prompt(best_question_node)
+            selection_prompt = self.task.get_answer_selection_prompt(best_question_node)
             LOGGER.info("Posing question to Benchmark LLM...")
             selection_output, input_tokens, output_tokens = await call_llm(
                 selection_prompt, self.benchmark_model
             )
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
-            selected_evidence_node = task.parse_answer_selection_output(
+            selected_evidence_node = self.task.parse_answer_selection_output(
                 selection_output, best_question_node
             )
             LOGGER.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
@@ -71,12 +82,12 @@ class Method:
         )
 
         LOGGER.info(
-            f"Completed run! Best guess: {best_guess}, Target: {task.task_answer}"
+            f"Completed run! Best guess: {best_guess}, Target: {self.task.task_answer}"
         )
 
         return RunRecord(
-            task_info=str(task),
-            true_answer=task.task_answer,
+            task_info=str(self.task),
+            true_answer=self.task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
             total_input_tokens=self.total_input_tokens,
@@ -86,45 +97,38 @@ class Method:
             final_answer=best_guess,
         )
 
-    async def expand_evidence(
-        self, curr: EvidenceNode, task: Task, current_depth: int
-    ) -> None:
-        if self.is_terminal(curr, task) or current_depth >= task.max_lookahead_depth:
+    async def expand_evidence(self, curr: EvidenceNode, current_depth: int) -> None:
+        if self.is_terminal(curr) or current_depth >= self.task.max_lookahead_depth:
             return
 
         if not curr.children:
-            prompt = task.get_question_generation_prompt(curr)
+            prompt = self.task.get_question_generation_prompt(curr)
             output, input_tokens, output_tokens = await call_llm(
                 prompt, self.method_model
             )
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
-            new_questions = task.parse_question_generation_output(output)
+            new_questions = self.task.parse_question_generation_output(output)
             new_question_nodes = [QuestionNode(q, curr) for q in new_questions]
             curr.children.extend(new_question_nodes)
 
         await asyncio.gather(
-            *[
-                self.expand_questions(child, task, current_depth)
-                for child in curr.children
-            ]
+            *[self.expand_questions(child, current_depth) for child in curr.children]
         )
 
-    async def expand_questions(
-        self, curr: QuestionNode, task: Task, current_depth: int
-    ) -> None:
+    async def expand_questions(self, curr: QuestionNode, current_depth: int) -> None:
         if not curr.children:
             cluster = self.question_clustering.get_cluster(curr.question)
 
             async with cluster.lock:
                 if cluster.likelihoods is None:
                     output, input_tokens, output_tokens = await call_llm(
-                        task.get_likelihood_elicitation_prompt(curr.question),
+                        self.task.get_likelihood_elicitation_prompt(curr.question),
                         self.benchmark_model,
                     )
                     self.total_input_tokens += input_tokens
                     self.total_output_tokens += output_tokens
-                    cluster.likelihoods = task.parse_likelihood_elicitation_output(
+                    cluster.likelihoods = self.task.parse_likelihood_elicitation_output(
                         output
                     )
 
@@ -141,10 +145,7 @@ class Method:
                 curr.children.append(evidence_node)
 
         await asyncio.gather(
-            *[
-                self.expand_evidence(child, task, current_depth + 1)
-                for child in curr.children
-            ]
+            *[self.expand_evidence(child, current_depth + 1) for child in curr.children]
         )
 
     def calculate_posterior(
@@ -175,9 +176,10 @@ class Method:
 
         return posterior, marginal
 
-    def is_terminal(self, node: EvidenceNode, task: Task) -> bool:
-        return get_conversation_depth(node) >= task.max_conversation_depth or any(
-            prob >= task.confidence_threshold for prob in node.belief_state.values()
+    def is_terminal(self, node: EvidenceNode) -> bool:
+        return get_conversation_depth(node) >= self.task.max_conversation_depth or any(
+            prob >= self.task.confidence_threshold
+            for prob in node.belief_state.values()
         )
 
 
