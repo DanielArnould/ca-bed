@@ -1,12 +1,11 @@
 import asyncio
 from dataclasses import dataclass, field
 import logging
-from operator import itemgetter
 
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
 from voyager import Index, Space
 
-LOGGER = logging.getLogger("Question Clustering")
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
