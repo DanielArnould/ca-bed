@@ -1,14 +1,14 @@
 import asyncio
 from datetime import datetime
 import logging
-from history import RunHistory
+from history import RunRecord, serialise_tree
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from question_clustering import QuestionClustering
 from rewards import expected_reward
 from tasks.task import Task
 
-LOGGER = logging.getLogger("Method")
+LOGGER = logging.getLogger(__name__)
 
 
 class Method:
@@ -34,7 +34,7 @@ class Method:
         )
         LOGGER.info(f"Created root node: {str(self.root)}")
 
-    async def run(self, task: Task) -> RunHistory:
+    async def run(self, task: Task) -> RunRecord:
         start_time = datetime.now()
         final_path = []
 
@@ -51,7 +51,7 @@ class Method:
             LOGGER.info("Posing question to Benchmark LLM...")
             selection_output = await call_llm(selection_prompt, self.benchmark_model)
             selected_evidence_node = task.parse_answer_selection_output(
-                selection_output.string, best_question_node
+                selection_output, best_question_node
             )
             LOGGER.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
             current_node = selected_evidence_node
@@ -67,14 +67,12 @@ class Method:
             f"Completed run! Best guess: {best_guess}, Target: {task.task_answer}"
         )
 
-        # UNSAFE RETURN, since tree and question clustering could be mutated
-        # Voyager has issues being deepcopied though
-        return RunHistory(
+        return RunRecord(
             task_info=str(task),
-            actual_answer=task.task_answer,
+            true_answer=task.task_answer,
             start_time=start_time,
             end_time=datetime.now(),
-            tree=self.root,
+            serialised_tree=serialise_tree(self.root),
             final_path=final_path,
             final_answer=best_guess,
         )
@@ -88,7 +86,7 @@ class Method:
         if not curr.children:
             prompt = task.get_question_generation_prompt(curr)
             output = await call_llm(prompt, self.method_model)
-            new_questions = task.parse_question_generation_output(output.string)
+            new_questions = task.parse_question_generation_output(output)
             new_question_nodes = [QuestionNode(q, curr) for q in new_questions]
             curr.children.extend(new_question_nodes)
 
@@ -112,7 +110,7 @@ class Method:
                         self.benchmark_model,
                     )
                     cluster.likelihoods = task.parse_likelihood_elicitation_output(
-                        output.string
+                        output
                     )
 
             for answer, likelihoods in cluster.likelihoods.items():

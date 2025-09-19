@@ -8,14 +8,14 @@ from question_clustering import Cluster, QuestionClustering
 
 
 @dataclass
-class RunHistory:
+class RunRecord:
     task_info: str
     true_answer: str
     start_time: datetime
     end_time: datetime
     final_path: list[str]
     final_answer: str
-    tree: EvidenceNode
+    serialised_tree: dict | None
 
 
 def serialise_tree(root: EvidenceNode) -> dict:
@@ -109,7 +109,7 @@ def load_question_clustering(json_path: Path, voyager_path: Path) -> QuestionClu
     return clustering
 
 
-def serialise_run_history(history: RunHistory) -> dict:
+def serialise_run_record(history: RunRecord) -> dict:
     return {
         "task_info": history.task_info,
         "true_answer": history.true_answer,
@@ -117,20 +117,20 @@ def serialise_run_history(history: RunHistory) -> dict:
         "end_time": history.end_time.isoformat(),
         "final_path": history.final_path,
         "final_answer": history.final_answer,
-        "tree": serialise_tree(history.tree),
+        "tree": history.serialised_tree,
     }
 
 
-def deserialise_run_history(
+def deserialise_run_record(
     history_dict: dict,
     include_tree: bool = False,
-) -> RunHistory:
-    return RunHistory(
+) -> RunRecord:
+    return RunRecord(
         task_info=history_dict["task_info"],
         true_answer=history_dict["true_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
-        tree=deserialise_tree(history_dict["tree"]) if include_tree else None,  # type: ignore
+        serialised_tree=history_dict["tree"] if include_tree else None,
         final_path=history_dict["final_path"],
         final_answer=history_dict["final_answer"],
     )
