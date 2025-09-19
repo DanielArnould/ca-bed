@@ -13,11 +13,10 @@ def information_gain(
     return shannon_entropy(prior_belief_state) - shannon_entropy(posterior_belief_state)
 
 
-# Lambda is set to 0.4 in UoT Paper (see page 20, I.6)
 def specificity_penalty(question: QuestionNode, penalty_scalar: float = 0.4) -> float:
     max_likelihood = max(evidence.marginal_likelihood for evidence in question.children)
     min_likelihood = min(evidence.marginal_likelihood for evidence in question.children)
-    return penalty_scalar * max_likelihood - min_likelihood
+    return penalty_scalar * (max_likelihood - min_likelihood)
 
 
 def immediate_reward(evidence: EvidenceNode) -> float:
