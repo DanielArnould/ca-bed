@@ -95,6 +95,7 @@ async def main() -> None:
     # ========== EXECUTION ==========
     output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
     output_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(output_dir)
 
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
     question_clustering = QuestionClustering(clustering_threshold)
