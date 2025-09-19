@@ -6,18 +6,16 @@ from pathlib import Path
 from node import EvidenceNode, QuestionNode
 from question_clustering import Cluster, QuestionClustering
 
-from voyager import Index
-
 
 @dataclass
 class RunHistory:
     task_info: str
-    actual_answer: str
+    true_answer: str
     start_time: datetime
     end_time: datetime
-    tree: EvidenceNode
     final_path: list[str]
     final_answer: str
+    tree: EvidenceNode
 
 
 def serialise_tree(root: EvidenceNode) -> dict:
@@ -72,7 +70,7 @@ def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
     return _deserialise(serialised_tree, parent=None)  # type: ignore
 
 
-def serialise_question_clustering(
+def save_question_clustering(
     clustering: QuestionClustering, json_path: Path, voyager_path: Path
 ) -> None:
     serialised_clusters = {
@@ -91,9 +89,7 @@ def serialise_question_clustering(
     clustering.index.save(str(voyager_path))
 
 
-def deserialise_question_clustering(
-    json_path: Path, voyager_path: Path
-) -> QuestionClustering:
+def load_question_clustering(json_path: Path, voyager_path: Path) -> QuestionClustering:
     clustering = QuestionClustering(threshold=-1)
 
     with json_path.open("r") as f:
@@ -116,7 +112,7 @@ def deserialise_question_clustering(
 def serialise_run_history(history: RunHistory) -> dict:
     return {
         "task_info": history.task_info,
-        "actual_answer": history.actual_answer,
+        "true_answer": history.true_answer,
         "start_time": history.start_time.isoformat(),
         "end_time": history.end_time.isoformat(),
         "final_path": history.final_path,
@@ -131,7 +127,7 @@ def deserialise_run_history(
 ) -> RunHistory:
     return RunHistory(
         task_info=history_dict["task_info"],
-        actual_answer=history_dict["actual_answer"],
+        true_answer=history_dict["true_answer"],
         start_time=datetime.fromisoformat(history_dict["start_time"]),
         end_time=datetime.fromisoformat(history_dict["end_time"]),
         tree=deserialise_tree(history_dict["tree"]) if include_tree else None,  # type: ignore
