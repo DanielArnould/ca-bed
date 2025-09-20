@@ -71,7 +71,7 @@ async def run_single_task(
 
 
 async def main() -> None:
-    # ========== CONFIG ==========
+    # =============== CONFIG ===============
     benchmark_model = Model.LLAMA_3_3
     method_model = Model.LLAMA_3_3
     sharpness_constant = 0.4
@@ -92,7 +92,7 @@ async def main() -> None:
         for item in dataset
     ]
 
-    # ========== EXECUTION ==========
+    # =============== EXECUTION ===============
     output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir)
