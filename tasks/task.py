@@ -65,8 +65,14 @@ class Task(ABC):
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         pass
 
-    @abstractmethod
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
     ) -> EvidenceNode:
-        pass
+        llm_answer = output.strip().lower()
+        for child in question_node.children:
+            if child.answer.lower() in llm_answer:
+                return child
+
+        raise RuntimeError(
+            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
+        )
