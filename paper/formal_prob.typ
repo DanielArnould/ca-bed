@@ -4,7 +4,7 @@
 This document specifies a formal framework for a probabilistic inference system designed to determine the most likely hypothesis from a discrete set. It is fundamentally based on the #link("https://arxiv.org/abs/2402.03271")[Uncertainty of Thoughts] algorithm and functions as an extension upon it, but the document should be comprehensible on its own. 
 The system operates as an interactive agent, employing multiple Large Language Models (LLMs) for knowledge elicitation within a Bayesian framework. Optimal interaction is achieved through an $M$-step lookahead search algorithm, where the agent selects questions to maximise a reward function based on information gain.
 === Probabilistic Model
-*Hypothesis Space (*$cal(H)$*).* The Hypothesis Space is a discrete, mutually exclusive set of potential answers or solutions to a question, denoted by $cal(H) = {h_1, h_2, ..., h_n}$. For example, in the context of a clinical diagnosis, $cal(H)$ would represent the set of possible diseases.
+*Hypothesis Space (*$cal(H)$*).* The Hypothesis Space is a discrete, mutually exclusive set of potential answers or solutions to a question, denoted by $cal(H) = {h_1, h_2, ..., h_n}$. For example, in the context of a clinical diagnosis, $cal(H)$ would represent the set of possible diseases
 *Belief State (*$B$*).* The Belief State is a probability distribution over the Hypothesis Space. At any step $k$, the belief state is a vector $B_k$, where the $i$-th element represents the probability of hypothesis $h_i$, given the evidence gathered so far.
 $
 B_k = [P(h_1|E_1,...,E_k), P(h_2|E_1,...,E_k), ..., P(h_n|E_1,...,E_k)]
