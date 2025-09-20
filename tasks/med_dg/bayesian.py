@@ -83,7 +83,7 @@ class Bayesian(Task):
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
-            ONLY ASK QUESTIONS WHERE THE ANSWER IS YES OR NO.
+            ONLY ASK QUESTIONS WHERE THE ANSWER IS YES OR NO. IF THE ANSWER IS ANY OTHER WORD DO NOT ASK IT.
             Format your response in this structure:
             1. <Question 1>
             2. <Question 2>
