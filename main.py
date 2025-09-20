@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from history import (
+    load_question_clustering,
     save_question_clustering,
     serialise_run_record,
 )
@@ -24,7 +25,7 @@ def setup_logging(output_dir: Path) -> None:
         format="[%(asctime)s][%(levelname)s][%(name)s]: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(output_dir / "logs.log"),
+            logging.FileHandler(output_dir / "logs.log", encoding="utf-8"),
         ],
         force=True,
     )
@@ -72,10 +73,10 @@ async def run_single_task(
 
 async def main() -> None:
     # =============== CONFIG ===============
-    benchmark_model = Model.GEMMA_3N_4B_OLLAMA
-    method_model = Model.GEMMA_3N_4B_OLLAMA
+    benchmark_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
+    method_model = Model.GPT_OSS_20B
     sharpness_constant = 0.4
-    max_concurrent = 1
+    max_concurrent = 4
     clustering_threshold = 0.97
     dataset = load_balanced_data(0.3)
 
@@ -89,7 +90,7 @@ async def main() -> None:
             confidence_threshold=0.7,
             self_report=item.self_report,
         )
-        for item in dataset[:1]
+        for item in dataset
     ]
 
     # =============== EXECUTION ===============
@@ -109,10 +110,10 @@ async def main() -> None:
                 task,
                 output_dir,
                 semaphore,
-                benchmark_model,
-                method_model,
-                sharpness_constant,
-                question_clustering,
+                benchmark_model=benchmark_model,
+                method_model=method_model,
+                sharpness_constant=sharpness_constant,
+                question_clustering=question_clustering,
             )
             for i, task in enumerate(tasks)
         ]

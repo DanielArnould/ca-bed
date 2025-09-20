@@ -131,7 +131,7 @@ class Method:
                 if cluster.likelihoods is None:
                     output, input_tokens, output_tokens = await call_llm(
                         self.task.get_likelihood_elicitation_prompt(curr.question),
-                        self.benchmark_model,
+                        self.method_model,
                     )
                     self.total_input_tokens += input_tokens
                     self.total_output_tokens += output_tokens
