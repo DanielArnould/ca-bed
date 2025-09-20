@@ -155,24 +155,11 @@ class Bayesian(Task):
         return (
             dedent("""\
             You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you up to 6 questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            Note that you must never reveal the disease until I tell it correctly. ONLY ANSWER WITH YES OR NO.
+            I will ask you questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question_node.question)
             .strip()
-        )
-
-    @override
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        assert False, (
-            f"No matching answer selected for question: {question_node.question}. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )

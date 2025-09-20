@@ -83,6 +83,7 @@ class Baseline(Task):
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            ONLY ASK QUESTIONS WHERE THE ANSWER IS YES OR NO. IF THE ANSWER IS ANY OTHER WORD DO NOT ASK IT.
             Format your response in this structure:
             1. <Question 1>
             2. <Question 2>
@@ -95,15 +96,6 @@ class Baseline(Task):
             .strip()
         )
         prompt_parts.append(generation_prompt)
-
-        # TODO: Investigate effect of targeted questions
-        # if get_conversation_depth(current_node) >= 3:
-        #     target_prompt = dedent("""\
-        #         Note that you should point out and ask what disease the patient suffers from now.
-        #         Refer to the past conversation regarding the patient's symptoms. Never repeat previously asked questions.
-        #         The question must start with 'Are you suffering from ...'
-        #         """).strip()
-        #     prompt_parts.append(target_prompt)
 
         return "\n\n".join(prompt_parts)
 
@@ -123,7 +115,7 @@ class Baseline(Task):
 
         return (
             dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            You are an expert medical doctor.
 
             Here are all the possible diseases that the patient may suffer from:
             {items_str}
@@ -143,7 +135,6 @@ class Baseline(Task):
             Count of NO: <integer>
             """)
             .format(
-                self_report=self.self_report,
                 items_str=hypothesis_space,
                 question=question,
             )
@@ -171,23 +162,11 @@ class Baseline(Task):
         return (
             dedent("""\
             You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you up to 6 questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            Note that you must never reveal the disease until I tell it correctly. 
+            I will ask you questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question_node.question)
             .strip()
-        )
-
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        assert False, (
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )
