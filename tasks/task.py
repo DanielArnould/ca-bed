@@ -1,12 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from node import EvidenceNode, QuestionNode
-
-
-@dataclass
-class Question:
-    question: str
-    answers: list[str]
 
 
 class Task(ABC):
@@ -41,10 +34,6 @@ class Task(ABC):
         self.hypothesis_space = hypothesis_space
 
     @abstractmethod
-    def get_initial_belief_state(self) -> dict[str, float]:
-        pass
-
-    @abstractmethod
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         """
         From the current node, create a prompt that asks for new questions
@@ -52,14 +41,12 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def parse_question_generation_output(self, output: str) -> list[Question]:
+    def parse_question_generation_output(self, output: str) -> list[str]:
         """Parse questions into question and possible answers"""
         pass
 
     @abstractmethod
-    def get_likelihood_elicitation_prompt(
-        self, current_node: EvidenceNode, question: Question
-    ) -> str:
+    def get_likelihood_elicitation_prompt(self, question: str) -> str:
         """
         Given a question, create a prompt that asks for the likelihoods for every hypothesis for every answer
         """
@@ -67,7 +54,7 @@ class Task(ABC):
 
     @abstractmethod
     def parse_likelihood_elicitation_output(
-        self, output: str, question: Question
+        self, output: str
     ) -> dict[str, dict[str, float]]:
         """
         For each answer of the question, return a dict mapping each hypothesis to the likelihood of the answer given the hypothesis.
@@ -78,8 +65,14 @@ class Task(ABC):
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         pass
 
-    @abstractmethod
     def parse_answer_selection_output(
         self, output: str, question_node: QuestionNode
     ) -> EvidenceNode:
-        pass
+        llm_answer = output.strip().lower()
+        for child in question_node.children:
+            if child.answer.lower() in llm_answer:
+                return child
+
+        raise RuntimeError(
+            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
+        )

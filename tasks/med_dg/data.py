@@ -1,8 +1,9 @@
+from collections import defaultdict
 from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import polars as pl
+import random
 
 MED_DG_SET = [
     "Enteritis",
@@ -29,7 +30,7 @@ class MedDGInstance:
     self_report: str
 
 
-def load_data() -> list[MedDGInstance]:
+def load_all_data() -> list[MedDGInstance]:
     data_path = Path(os.path.dirname(__file__), "MedDG.json")
     with data_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -38,82 +39,84 @@ def load_data() -> list[MedDGInstance]:
         for inst in data
     ]
 
-def load_data_even(sample_percentage: float = 1.0, seed: int = 42) -> list[MedDGInstance]:
-    if not (0 < sample_percentage <= 1):
-        raise ValueError("sample_percentage must be in (0, 1].")
 
+def load_balanced_data(
+    sample_percentage: float = 1.0, seed: int = 42
+) -> list[MedDGInstance]:
     data_path = Path(os.path.dirname(__file__), "MedDG.json")
     with data_path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
 
-    df = pl.DataFrame(raw).rename({"self_repo": "self_report", "target": "disease"})
-    if sample_percentage == 1.0:
-        return [
-            MedDGInstance(disease=row["disease"], self_report=row["self_report"])
-            for row in df.iter_rows(named=True)
+    disease_groups = defaultdict(list)
+    for item in raw:
+        disease = item["target"]
+        self_report = item["self_repo"]
+        disease_groups[disease].append({"disease": disease, "self_report": self_report})
+
+    total_samples = sum(len(group) for group in disease_groups.values())
+    target_size = int(total_samples * sample_percentage)
+    base_samples_per_disease = target_size // len(disease_groups)
+
+    # First pass: allocate what each disease can provide
+    # keep track of classes that are limited in size
+    allocation = {}
+    leftover = 0
+
+    for disease, items in disease_groups.items():
+        available = len(items)
+        desired = base_samples_per_disease
+
+        if available < desired:
+            # This disease is limited by its size
+            allocation[disease] = available
+            leftover += desired - available
+        else:
+            # This disease can provide the desired amount
+            allocation[disease] = desired
+
+    # Second pass: redistribute leftover to diseases that can take more
+    # so we are still close to the target subset size, but also balanced
+    if leftover > 0:
+        diseases_with_capacity = [
+            disease
+            for disease, items in disease_groups.items()
+            if len(items) > allocation[disease]
         ]
 
-    total = df.height
-    diseases = sorted(df.select(pl.col("disease")).unique().to_series().to_list())
-    k = len(diseases)
-    budget = int(round(total * sample_percentage))
-    if budget == 0:
-        return []
+        while leftover > 0 and diseases_with_capacity:
+            for disease in diseases_with_capacity[:]:
+                if leftover == 0:
+                    break
 
-    size_map: dict[str, int] = (
-        df.group_by("disease").agg(pl.len().alias("cnt")).to_dict(as_series=False)
-    )
-    size_map = {d: c for d, c in zip(size_map["disease"], size_map["cnt"])}
-    base = budget // k
-    remainder = budget % k
-    alloc: dict[str, int] = {}
-    for idx, d in enumerate(diseases):
-        alloc[d] = base + (1 if idx < remainder else 0)
+                available = len(disease_groups[disease])
+                current_allocation = allocation[disease]
 
-    # Cap by class capacity, track leftover
-    leftover = 0
-    for d in diseases:
-        cap = size_map[d]
-        if alloc[d] > cap:
-            leftover += alloc[d] - cap
-            alloc[d] = cap
+                if current_allocation < available:
+                    allocation[disease] += 1
+                    leftover -= 1
+                else:
+                    # This disease is now at capacity
+                    diseases_with_capacity.remove(disease)
 
-    # Redistribute leftover to classes with remaining capacity
-    if leftover > 0:
-        for d in diseases:
-            if leftover == 0:
-                break
-            cap = size_map[d]
-            while alloc[d] < cap and leftover > 0:
-                alloc[d] += 1
-                leftover -= 1
+    random.seed(seed)
+    balanced_data = []
 
-    # Now sample rows per disease
-    def sample_group(g: pl.DataFrame) -> pl.DataFrame:
-        d = g["disease"][0]
-        n = alloc.get(d, 0)
-        if n <= 0:
-            return pl.DataFrame(schema=g.schema)
-        if g.height <= n:
-            return g
-        return g.sample(n=n, seed=seed)
+    for disease, items in disease_groups.items():
+        n_samples = allocation[disease]
+        if n_samples > 0:
+            sampled_items = random.sample(items, n_samples)
+            balanced_data.extend(sampled_items)
 
-    sampled = df.group_by("disease").map_groups(sample_group)
-    # Drop any empty groups
-    sampled = sampled.filter(pl.col("self_report").is_not_null())
-    # Deterministic shuffle
-    sampled = sampled.sample(fraction=1.0, seed=seed)
+    random.shuffle(balanced_data)
 
     return [
-        MedDGInstance(disease=row["disease"], self_report=row["self_report"])  # type: ignore[index]
-        for row in sampled.iter_rows(named=True)
+        MedDGInstance(disease=item["disease"], self_report=item["self_report"])
+        for item in balanced_data
     ]
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     from collections import Counter
-    dataset = load_data_even(0.3)
-    counter = Counter()
-    for item in dataset:
-        counter[item.disease] += 1
-    
-    print(counter)
+
+    dataset = load_balanced_data(0.5)
+    print(Counter(item.disease for item in dataset))

@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
+import logging
 from dotenv import load_dotenv
 import os
 
@@ -10,150 +10,70 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from loggers import get_logger
-
 load_dotenv()
+LOGGER = logging.getLogger(__name__)
+INPUT_TOKEN_COUNT = 0
+OUTPUT_TOKEN_COUNT = 0
+
+
+def _make_async_client(api_key: str | None, base_url: str) -> AsyncOpenAI | None:
+    if api_key is None:
+        return None
+
+    LOGGER.info(
+        f"Creating client for {base_url} with key {len(api_key[:-1]) * '#' + api_key[-4:]}"
+    )
+    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+
+CLIENTS = {
+    "deepseek": _make_async_client(
+        os.getenv("DEEPSEEK_KEY"), "https://api.deepseek.com"
+    ),
+    "together": _make_async_client(
+        os.getenv("TOGETHER_AI_KEY"), "https://api.together.xyz/v1"
+    ),
+    "openai": _make_async_client(os.getenv("OPENAI_KEY"), "https://api.openai.com/v1"),
+}
 
 
 class Model(Enum):
-    DEEPSEEK_CHAT = auto()
-    DEEPSEEK_REASONER = auto()
-    DUMMY = auto()
-    GPT_4O_MINI = auto()
-    GPT_5_NANO = auto()
+    DEEPSEEK_CHAT = ("deepseek", "deepseek-chat")
+    DEEPSEEK_CHAT_TOGETHER_AI = ("together", "deepseek-ai/DeepSeek-V3.1")
+    GPT_4O_MINI = ("openai", "gpt-4o-mini-2024-07-18")
+    LLAMA_3_3 = ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")
+    DUMMY = ("dummy", "dummy")
 
 
-DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
-DEEPSEEK_CLIENT = (
-    AsyncOpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
-    if DEEPSEEK_KEY is not None
-    else None
-)
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
+async def call_llm(input_text: str, model: Model) -> tuple[str, int, int]:
+    """Returns (response, prompt token count, completion token count)"""
 
-OPENAI_KEY = os.getenv("OPENAI_KEY")
-OPENAI_CLIENT = AsyncOpenAI(api_key=OPENAI_KEY) if OPENAI_KEY is not None else None
+    if model == Model.DUMMY:
+        print(f"[DUMMY LLM]: {input_text}")
+        return input("Enter a response: "), 0, 0
 
+    client_key, model_id = model.value
+    client = CLIENTS[client_key]
+    if client is None:
+        raise RuntimeError(
+            f"Client for {model.name} is not configured with an API key."
+        )
 
-@dataclass
-class Token:
-    string: str
-    bytes: list[int]
-    logprob: float
+    LOGGER.info(f"Sending to {model_id}: '{input_text.replace('\n', ' ')}'")
 
-
-@dataclass
-class LLMOutput:
-    string: str
-    tokens: list[Token] | None = None
-    reasoning: str | None = None
-
-
-async def _call_deepseek_chat(input_text: str) -> LLMOutput:
-    assert DEEPSEEK_CLIENT is not None, (
-        "DEEPSEEK_CLIENT not setup (have you provided a key?)"
-    )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to Deepseek Chat")
-
-    response = await DEEPSEEK_CLIENT.chat.completions.create(
-        model="deepseek-chat",
+    response = await client.chat.completions.create(
+        model=model_id,
         messages=[{"role": "user", "content": input_text}],
-        logprobs=True,
         max_tokens=4096,
-        temperature=0.0,  # UoT does not specify a temperature, but their repo suggests 0.0
+        temperature=0,
+        n=1,
         stream=False,
     )
 
-    logger.info("Received response from Deepseek Chat")
-    logger.debug(str(response))
-    return LLMOutput(
-        string=response.choices[0].message.content,  # type: ignore
-        tokens=[
-            Token(token.token, token.bytes, token.logprob)  # type: ignore
-            for token in response.choices[0].logprobs.content  # type: ignore
-        ],
+    LOGGER.info(f"Received response from {model_id}: '{response}'")
+    return (
+        response.choices[0].message.content,  # type: ignore
+        response.usage.prompt_tokens,  # type: ignore
+        response.usage.completion_tokens,  # type: ignore
     )
-
-
-async def _call_deepseek_reasoner(input_text: str) -> LLMOutput:
-    assert DEEPSEEK_CLIENT is not None, (
-        "DEEPSEEK_CLIENT not setup (have you provided a key?)"
-    )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to Deepseek Reasoner")
-
-    response = await DEEPSEEK_CLIENT.chat.completions.create(
-        model="deepseek-reasoner",
-        messages=[{"role": "user", "content": input_text}],
-        max_tokens=32_000,
-    )
-
-    logger.info("Received response from Deepseek Chat")
-    logger.debug(str(response))
-    return LLMOutput(
-        string=response.choices[0].message.content,  # type: ignore
-        reasoning=response.choices[0].message.reasoning_content,  # type: ignore
-    )
-
-
-async def _call_dummy(input_text: str) -> LLMOutput:
-    # NOT ASYNCHRONOUS
-    print(f"[DUMMY LLM]: {input_text}")
-    response = input("Enter a response: ")
-    return LLMOutput(response)
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=3, max=360))
-async def _call_gpt_4o_mini(input_text: str) -> LLMOutput:
-    assert OPENAI_CLIENT is not None, (
-        "OPENAI_CLIENT not setup (have you provided a key?)"
-    )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to gpt-4o-mini")
-
-    response = await OPENAI_CLIENT.chat.completions.create(
-        model="gpt-4o-mini-2024-07-18",
-        messages=[{"role": "user", "content": input_text}],
-        temperature=0.0,
-        n=1,
-    )
-
-    logger.info("Received response from gpt-4o-mini")
-    logger.debug(str(response))
-    return LLMOutput(
-        string=response.choices[0].message.content,  # type: ignore
-    )
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=3, max=360))
-async def _call_gpt_5_nano(input_text: str) -> LLMOutput:
-    assert OPENAI_CLIENT is not None, (
-        "OPENAI_CLIENT not setup (have you provided a key?)"
-    )
-    logger = get_logger("LLM Models")
-    logger.info("Sending message to gpt-5-nano")
-
-    response = await OPENAI_CLIENT.chat.completions.create(
-        model="gpt-5-nano-2025-08-07",
-        messages=[{"role": "user", "content": input_text}],
-    )
-
-    logger.info("Received response from gpt-5-nano")
-    logger.debug(str(response))
-    return LLMOutput(
-        string=response.choices[0].message.content,  # type: ignore
-    )
-
-
-async def call_llm(input_text: str, model: Model) -> LLMOutput:
-    match model:
-        case Model.DEEPSEEK_CHAT:
-            return await _call_deepseek_chat(input_text)
-        case Model.DEEPSEEK_REASONER:
-            return await _call_deepseek_reasoner(input_text)
-        case Model.DUMMY:
-            return await _call_dummy(input_text)
-        case Model.GPT_4O_MINI:
-            return await _call_gpt_4o_mini(input_text)
-        case Model.GPT_5_NANO:
-            return await _call_gpt_5_nano(input_text)

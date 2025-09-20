@@ -1,69 +1,130 @@
-"""
-Unused for now, but will be an entry point for eval
-and API later.
-"""
-
 import asyncio
 from datetime import datetime
 import json
-import multiprocessing
+import logging
 from pathlib import Path
 
-from experiment_logging import serialise_run_history
-from loggers import get_logger, setup_logger
+from history import (
+    save_question_clustering,
+    serialise_run_record,
+)
 from method import Method
 from models import Model
+from question_clustering import QuestionClustering
+from tasks.med_dg.bayesian import Bayesian
+from tasks.med_dg.data import MED_DG_SET, load_balanced_data
 from tasks.task import Task
-from tasks.craft_md.data import load_data
-from tasks.craft_md.baseline import Baseline
+
+LOGGER = logging.getLogger(__name__)
 
 
-def run_task(task: Task, model: Model):
-    current_time_formatted = datetime.now().strftime("%Y%m%d_%H%M%S")
-    current_process = multiprocessing.current_process()
-    current_process.name = f"{task.__class__.__name__}-{task.task_answer}"
-    output_dir = Path(f"logs/{current_time_formatted}/")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    setup_logger("Main", output_dir)
-    setup_logger("Method", output_dir)
-    setup_logger("LLM Models", output_dir)
-    logger = get_logger("Main")
-
-    method = Method(
-        model,
-        task,
+def setup_logging(output_dir: Path) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s][%(levelname)s][%(name)s]: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(output_dir / "logs.log"),
+        ],
+        force=True,
     )
-    history = asyncio.run(method.run())
-    run_history_path = output_dir / f"{current_process.name}_run.json"
-
-    logger.info(f"Completed run, saving output to {run_history_path}")
-    with run_history_path.open("w") as f:
-        json.dump(serialise_run_history(history), f)
-
-    logger.info(f"Run saved to {run_history_path}")
 
 
-def main():
-    model = Model.GPT_4O_MINI
-    craft_md, hypothesis_space = load_data()
+async def run_single_task(
+    idx: int,
+    task: Task,
+    output_dir: Path,
+    semaphore: asyncio.Semaphore,
+    benchmark_model: Model,
+    method_model: Model,
+    sharpness_constant: float,
+    question_clustering: QuestionClustering,
+) -> None:
+    async with semaphore:
+        method = Method(
+            benchmark_model,
+            method_model,
+            sharpness_constant,
+            task,
+            question_clustering,
+        )
+        history = await method.run()
+
+        LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
+        question_clustering_path_json = output_dir / f"{idx}_cluster.json"
+        question_clustering_path_voyager = output_dir / f"{idx}_cluster.voy"
+
+        save_question_clustering(
+            question_clustering,
+            question_clustering_path_json,
+            question_clustering_path_voyager,
+        )
+
+        run_history_path = output_dir / f"{idx}_run.json"
+        with run_history_path.open("w") as f:
+            json.dump(serialise_run_record(history), f)
+
+        LOGGER.info(f"[{idx}] Run saved to {output_dir}")
+        LOGGER.info(
+            f"[{idx}] Total input tokens: {history.total_input_tokens} Total output tokens: {history.total_output_tokens}"
+        )
+
+
+async def main() -> None:
+    # =============== CONFIG ===============
+    benchmark_model = Model.LLAMA_3_3
+    method_model = Model.LLAMA_3_3
+    sharpness_constant = 0.4
+    max_concurrent = 8
+    clustering_threshold = 0.99
+    dataset = load_balanced_data(0.3)
+
     tasks = [
-        Baseline(
-            craft_md_instance=item,
-            hypothesis_space=hypothesis_space,
+        Bayesian(
+            task_answer=item.disease,
             max_question_nodes=3,
             max_lookahead_depth=3,
-            max_conversation_depth=6
+            max_conversation_depth=5,
+            hypothesis_space=MED_DG_SET,
+            confidence_threshold=0.7,
+            self_report=item.self_report,
         )
-        for item in craft_md[0:1]
+        for item in dataset
     ]
 
-    run_task(tasks[0], model)
-    # num_cores = multiprocessing.cpu_count()
-    # with multiprocessing.Pool(
-    #     processes=num_cores,
-    # ) as pool:
-    #     pool.starmap(run_task, [(task, model) for task in tasks])
+    # =============== EXECUTION ===============
+    output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(output_dir)
+
+    LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
+    question_clustering = QuestionClustering(clustering_threshold)
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    await asyncio.gather(
+        *[
+            run_single_task(
+                i,
+                task,
+                output_dir,
+                semaphore,
+                benchmark_model,
+                method_model,
+                sharpness_constant,
+                question_clustering,
+            )
+            for i, task in enumerate(tasks)
+        ]
+    )
+
+    save_question_clustering(
+        question_clustering,
+        output_dir / "final_cluster.json",
+        output_dir / "final_cluster.voy",
+    )
+    LOGGER.info("All runs completed successfully!")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,9 +1,9 @@
 import re
 from textwrap import dedent
+from typing import override
 
-from method import get_conversation_depth
 from node import EvidenceNode, QuestionNode
-from ..task import Question, Task
+from tasks.task import Task
 
 
 class Baseline(Task):
@@ -30,12 +30,9 @@ class Baseline(Task):
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Non-Bayesian): Answer: {self.task_answer}, Self Report: {self.self_report}, Max Question Nodes: {self.max_question_nodes}, Hypothesis Space: {self.hypothesis_space}"
+        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
 
-    def get_initial_belief_state(self) -> dict[str, float]:
-        prob = 1.0 / len(self.hypothesis_space)
-        return {item: prob for item in self.hypothesis_space}
-
+    @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         prompt_parts = []
         history = []
@@ -46,14 +43,18 @@ class Baseline(Task):
             history.append((question, answer))
             node = node.parent.parent
 
+        possible_diseases = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
         prologue = (
             dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}.
+            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+               
+            The patient is suffering from one of the following possible diseases:      
+            {possible_diseases}
+    
             You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No', in order to find what disease this patient suffers from. 
             Use the ongoing conversation for context to avoid redundant questions. 
-            Let us begin. Ask me the first question.
             """)
-            .format(self_report=self.self_report)
+            .format(self_report=self.self_report, possible_diseases=possible_diseases)
             .strip()
         )
         prompt_parts.append(prologue)
@@ -78,10 +79,11 @@ class Baseline(Task):
         )
         generation_prompt = (
             dedent("""\
-            Based on our current beliefs, the patient is most likely suffering from one of the following diseases, which are listed along with their probabilities:
+            Based on our current beliefs, the patient is most likely suffering from one of the following diseases:
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            ONLY ASK QUESTIONS WHERE THE ANSWER IS YES OR NO. IF THE ANSWER IS ANY OTHER WORD DO NOT ASK IT.
             Format your response in this structure:
             1. <Question 1>
             2. <Question 2>
@@ -95,41 +97,25 @@ class Baseline(Task):
         )
         prompt_parts.append(generation_prompt)
 
-        if get_conversation_depth(current_node) >= 3:
-            target_prompt = dedent("""\
-                Note that you should point out and ask what disease the patient suffers from now.
-                Refer to the past conversation regarding the patient's symptoms. Never repeat previously asked questions.
-                The question must start with 'Are you suffering from ...'
-                """).strip()
-            prompt_parts.append(target_prompt)
-
         return "\n\n".join(prompt_parts)
 
-    def parse_question_generation_output(self, output: str) -> list[Question]:
+    @override
+    def parse_question_generation_output(self, output: str) -> list[str]:
         question_texts: list[str] = re.findall(
             r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
         )
-        questions = []
-
-        for question_text in question_texts:
-            clean_question_text = question_text.strip().replace("?", "") + "?"
-            questions.append(
-                Question(question=clean_question_text, answers=["Yes", "No"])
-            )
-
-        return questions
-
-    def get_likelihood_elicitation_prompt(
-        self, current_node: EvidenceNode, question: Question
-    ) -> str:
-        pruned_hypothesis = [
-            item for item, prob in current_node.belief_state.items() if prob > 0
+        return [
+            question_text.strip().replace("?", "") + "?"
+            for question_text in question_texts
         ]
-        items_str = "\n".join(f"- {x}" for x in pruned_hypothesis)
+
+    @override
+    def get_likelihood_elicitation_prompt(self, question: str) -> str:
+        hypothesis_space = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
 
         return (
             dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            You are an expert medical doctor.
 
             Here are all the possible diseases that the patient may suffer from:
             {items_str}
@@ -149,13 +135,15 @@ class Baseline(Task):
             Count of NO: <integer>
             """)
             .format(
-                self_report=self.self_report, items_str=items_str, question=question
+                items_str=hypothesis_space,
+                question=question,
             )
             .strip()
         )
 
+    @override
     def parse_likelihood_elicitation_output(
-        self, output: str, question
+        self, output: str
     ) -> dict[str, dict[str, float]]:
         # grab text after YES: until "Count"
         m_yes = re.search(r"YES:\s*(.*?)\s*Count", output, re.DOTALL)
@@ -169,28 +157,16 @@ class Baseline(Task):
 
         return {"Yes": likelihoods_yes, "No": likelihoods_no}
 
+    @override
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""\
             You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you up to 6 questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            Note that you must never reveal the disease until I tell it correctly. 
-            If I tell the disease correctly in my question, directly respond: "You are right. I am experiencing {target_item}."
+            I will ask you questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question_node.question)
             .strip()
-        )
-
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        assert False, (
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )
