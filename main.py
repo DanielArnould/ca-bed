@@ -15,7 +15,7 @@ from tasks.med_dg.bayesian import Bayesian
 from tasks.med_dg.data import MED_DG_SET, load_balanced_data
 from tasks.task import Task
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("Main")
 
 
 def setup_logging(output_dir: Path) -> None:
@@ -72,11 +72,11 @@ async def run_single_task(
 
 async def main() -> None:
     # =============== CONFIG ===============
-    benchmark_model = Model.LLAMA_3_3
-    method_model = Model.LLAMA_3_3
+    benchmark_model = Model.GEMMA_3N_4B_OLLAMA
+    method_model = Model.GEMMA_3N_4B_OLLAMA
     sharpness_constant = 0.4
-    max_concurrent = 8
-    clustering_threshold = 0.99
+    max_concurrent = 1
+    clustering_threshold = 0.97
     dataset = load_balanced_data(0.3)
 
     tasks = [
@@ -89,7 +89,7 @@ async def main() -> None:
             confidence_threshold=0.7,
             self_report=item.self_report,
         )
-        for item in dataset
+        for item in dataset[:1]
     ]
 
     # =============== EXECUTION ===============
