@@ -12,7 +12,7 @@ from method import Method
 from models import Model
 from question_clustering import QuestionClustering
 from tasks.med_dg.bayesian import Bayesian
-from tasks.med_dg.data import MED_DG_SET, load_data_even
+from tasks.med_dg.data import MED_DG_SET, load_balanced_data
 from tasks.task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ async def main() -> None:
     sharpness_constant = 0.4
     max_concurrent = 8
     clustering_threshold = 0.99
-    dataset = load_data_even(0.3)
+    dataset = load_balanced_data(0.3)
 
     tasks = [
         Bayesian(
