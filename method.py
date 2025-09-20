@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 from functools import partial
 import logging
+from operator import itemgetter
 from history import RunRecord, serialise_tree
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
@@ -76,13 +77,18 @@ class Method:
 
             final_path.append(str(current_node))
 
-        best_guess = max(
-            current_node.belief_state,
-            key=current_node.belief_state.__getitem__,
-        )
+        best_guess, belief = max(current_node.belief_state.items(), key=itemgetter(1))
+
+        # Check we don't have another hypothesis with the same belief
+        if belief in (
+            other_belief
+            for hypo, other_belief in current_node.belief_state.items()
+            if hypo != best_guess
+        ):
+            best_guess = "INDETERMINATE"
 
         LOGGER.info(
-            f"Completed run! Best guess: {best_guess}, Target: {self.task.task_answer}"
+            f"Completed run! Best guess: {best_guess} Belief: {belief}, Target: {self.task.task_answer}"
         )
 
         return RunRecord(
