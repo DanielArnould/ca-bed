@@ -74,5 +74,5 @@ class Task(ABC):
                 return child
 
         raise RuntimeError(
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
+            f"No matching answer selected for '{question_node.question}'. Possible answers: {list(child.answer for child in question_node.children)}, Given answer: {llm_answer}"
         )
