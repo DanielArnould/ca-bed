@@ -87,15 +87,16 @@ class Method:
         ):
             best_guess = "INDETERMINATE"
 
+        end_time = datetime.now()
         LOGGER.info(
-            f"Completed run! Best guess: {best_guess} Belief: {belief}, Target: {self.task.task_answer}"
+            f"Completed run in {end_time - start_time}s! Best guess: {best_guess}, Belief: {belief}, Target: {self.task.task_answer}"
         )
 
         return RunRecord(
             task_info=str(self.task),
             true_answer=self.task.task_answer,
             start_time=start_time,
-            end_time=datetime.now(),
+            end_time=end_time,
             total_input_tokens=self.total_input_tokens,
             total_output_tokens=self.total_output_tokens,
             serialised_tree=serialise_tree(self.root),
