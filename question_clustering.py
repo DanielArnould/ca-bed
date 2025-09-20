@@ -27,7 +27,6 @@ class QuestionClustering:
         self.model = SentenceTransformer(
             "quora-distilbert-multilingual",
             backend="onnx",
-            model_kwargs={"file_name": "onnx/model_qint8_avx512.onnx"},
         )
         self.index = Index(Space.Cosine, num_dimensions=768)
         self.threshold = threshold
@@ -44,14 +43,14 @@ class QuestionClustering:
         if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
             best_cluster = self.clusters[neighbours[0]]
             LOGGER.info(
-                f"Cluster found for {question}, with similarity {1 - distances[0]}!"
+                f"Cluster found for '{question}', with similarity {1 - distances[0]}!"
             )
             best_cluster.questions[question] = (
                 best_cluster.questions.get(question, 0) + 1
             )
             return best_cluster
 
-        LOGGER.info(f"Cluster not found for {question}. Creating new cluster...")
+        LOGGER.info(f"Cluster not found for '{question}'. Creating new cluster...")
         idx = self.index.add_item(embedding)
         new_cluster = Cluster(
             {question: 1},
