@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import polars as pl
+import polars as pl
 
 MED_DG_SET = [
     "Enteritis",
@@ -117,4 +118,8 @@ if __name__ == "__main__":
     from collections import Counter
 
     dataset = load_data_even(0.3)
-    print(len(dataset))
+    counter = Counter()
+    for item in dataset:
+        counter[item.disease] += 1
+
+    print(counter)
