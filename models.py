@@ -11,13 +11,14 @@ from tenacity import (
 )
 
 load_dotenv()
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("LLM Models")
 INPUT_TOKEN_COUNT = 0
 OUTPUT_TOKEN_COUNT = 0
 
 
 def _make_async_client(api_key: str | None, base_url: str) -> AsyncOpenAI | None:
     if api_key is None:
+        LOGGER.info(f"Skipping client creation for {base_url}")
         return None
 
     LOGGER.info(
@@ -34,6 +35,7 @@ CLIENTS = {
         os.getenv("TOGETHER_AI_KEY"), "https://api.together.xyz/v1"
     ),
     "openai": _make_async_client(os.getenv("OPENAI_KEY"), "https://api.openai.com/v1"),
+    "ollama": _make_async_client("ollama", "http://localhost:11434/v1"),
 }
 
 
@@ -42,6 +44,7 @@ class Model(Enum):
     DEEPSEEK_CHAT_TOGETHER_AI = ("together", "deepseek-ai/DeepSeek-V3.1")
     GPT_4O_MINI = ("openai", "gpt-4o-mini-2024-07-18")
     LLAMA_3_3 = ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")
+    GEMMA_3N_4B_OLLAMA = ("ollama", "gemma3:1b")
     DUMMY = ("dummy", "dummy")
 
 

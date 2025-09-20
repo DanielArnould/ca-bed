@@ -10,7 +10,7 @@ from question_clustering import QuestionClustering
 from rewards import expected_reward
 from tasks.task import Task
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("Method")
 
 
 class Method:

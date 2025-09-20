@@ -5,7 +5,7 @@ import logging
 from sentence_transformers import SentenceTransformer
 from voyager import Index, Space
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("Question Clustering")
 
 
 @dataclass
