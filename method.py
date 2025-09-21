@@ -8,9 +8,103 @@ from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from question_clustering import QuestionClustering
 from rewards import expected_reward
-from tasks.task import Task
+from tasks.task import Task, DPTask
 
 LOGGER = logging.getLogger("Method")
+
+class DPMethod:
+    benchmark_model: Model
+    method_model: Model
+    task: DPTask
+    root: EvidenceNode
+    total_input_tokens: int
+    total_output_tokens: int
+    has_questioner_predicted: bool
+    perseverance: bool
+    history: list[tuple[str, str]]
+
+    def __init__(
+        self,
+        benchmark_model: Model,
+        method_model: Model,
+        task: DPTask,
+        perseverance: bool = False,
+    ):
+        self.benchmark_model = benchmark_model
+        self.method_model = method_model
+        self.task = task
+        self.perseverance = perseverance
+        self.root = EvidenceNode(
+            answer="ROOT",
+            belief_state={},
+            marginal_likelihood=1.0,
+        )
+        self.total_input_tokens = self.total_output_tokens = 0
+        self.history = []
+
+
+    async def run(self) -> RunRecord:
+        LOGGER.info('Starting Direct Prompting Run..')
+        start_time = datetime.now()
+        final_path = []
+
+        final_answer: str | None = None
+
+        final_path.append(f"START")
+
+        for i in range(self.task.max_conversation_depth):
+            questioner_output, input_tokens, output_tokens = await call_llm(
+                self.task.get_questioner_prompt(self.history), self.method_model
+            )
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+
+            has_questioner_predicted, answer_or_question = self.task.parse_questioner_output(questioner_output)
+
+            if has_questioner_predicted:
+                prediction = answer_or_question
+                if self.perseverance and prediction.strip().lower() != self.task.task_answer.strip().lower():
+                    LOGGER.info(f"Incorrect prediction at turn {i+1}: {prediction}. Continuing due to perseverance.")
+                    final_path.append(f"INCORRECT PREDICTION: {prediction}")
+                    continue
+                else:
+                    final_answer = prediction
+                    final_path.append(f"PREDICTION: {final_answer}")
+                    break
+
+            question = answer_or_question
+            final_path.append(f"Q: {question}")
+
+            answerer_output, input_tokens, output_tokens = await call_llm(
+                self.task.get_answerer_prompt(question), self.benchmark_model
+            )
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+
+            answer = self.task.parse_answerer_output(answerer_output)
+            self.history.append((question, answer))
+            final_path.append(f"A: {answer}")
+
+        end_time = datetime.now()
+        LOGGER.info(
+            f"Completed run in {end_time - start_time}s! Final answer: {final_answer}"
+        )
+
+        # Create a mock belief state for the RunRecord
+        final_belief_state = {final_answer: 1.0} if final_answer else {}
+
+
+        return RunRecord(
+            task_info=str(self.task),
+            true_answer=self.task.task_answer,
+            start_time=start_time,
+            end_time=end_time,
+            total_input_tokens=self.total_input_tokens,
+            total_output_tokens=self.total_output_tokens,
+            serialised_tree=serialise_tree(self.root),
+            final_path=final_path,
+            final_belief_state=final_belief_state,
+        )
 
 
 class Method:

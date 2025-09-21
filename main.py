@@ -9,12 +9,13 @@ from history import (
     save_question_clustering,
     serialise_run_record,
 )
-from method import Method
+from method import Method, DPMethod
 from models import Model
 from question_clustering import QuestionClustering
 from tasks.med_dg.baseline import Baseline
 from tasks.med_dg.bayesian import Bayesian
 from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
+from tasks.med_dg.direct import Direct
 from tasks.task import Task
 
 LOGGER = logging.getLogger("Main")
@@ -43,24 +44,22 @@ async def run_single_task(
     question_clustering: QuestionClustering,
 ) -> None:
     async with semaphore:
-        method = Method(
+        method = DPMethod(
             benchmark_model,
             method_model,
-            sharpness_constant,
             task,
-            question_clustering,
         )
         history = await method.run()
 
-        LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
-        question_clustering_path_json = output_dir / f"{idx}_cluster.json"
-        question_clustering_path_voyager = output_dir / f"{idx}_cluster.voy"
+        # LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
+        # question_clustering_path_json = output_dir / f"{idx}_cluster.json"
+        # question_clustering_path_voyager = output_dir / f"{idx}_cluster.voy"
 
-        save_question_clustering(
-            question_clustering,
-            question_clustering_path_json,
-            question_clustering_path_voyager,
-        )
+        # save_question_clustering(
+        #     question_clustering,
+        #     question_clustering_path_json,
+        #     question_clustering_path_voyager,
+        # )
 
         run_history_path = output_dir / f"{idx}_run.json"
         with run_history_path.open("w") as f:
@@ -74,22 +73,19 @@ async def run_single_task(
 
 async def main() -> None:
     # =============== CONFIG ===============
-    benchmark_model = Model.GPT_OSS_20B
-    method_model = Model.GPT_OSS_20B
+    benchmark_model = Model.GPT_4O_MINI
+    method_model = Model.GPT_4O_MINI
     sharpness_constant = 0.4
     max_concurrent = 8
     clustering_threshold = 0.97
     dataset = load_balanced_data(0.05)
 
     tasks = [
-        Baseline(
+        Direct(
             task_answer=item.disease,
-            max_question_nodes=2,
-            max_lookahead_depth=3,
-            max_conversation_depth=5,
             hypothesis_space=MED_DG_SET,
-            # confidence_threshold=0.7,
             self_report=item.self_report,
+            max_conversation_depth=5
         )
         for item in dataset
     ]
@@ -99,8 +95,8 @@ async def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir)
 
-    LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    question_clustering = QuestionClustering(clustering_threshold)
+    # LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
+    # question_clustering = QuestionClustering(clustering_threshold)
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -114,17 +110,17 @@ async def main() -> None:
                 benchmark_model=benchmark_model,
                 method_model=method_model,
                 sharpness_constant=sharpness_constant,
-                question_clustering=question_clustering,
+                question_clustering=None,
             )
             for i, task in enumerate(tasks)
         ]
     )
 
-    save_question_clustering(
-        question_clustering,
-        output_dir / "final_cluster.json",
-        output_dir / "final_cluster.voy",
-    )
+    # save_question_clustering(
+    #     question_clustering,
+    #     output_dir / "final_cluster.json",
+    #     output_dir / "final_cluster.voy",
+    # )
     LOGGER.info("All runs completed successfully!")
 
 
