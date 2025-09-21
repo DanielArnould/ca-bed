@@ -76,6 +76,23 @@ if __name__ == "__main__":
     run_evals: list[RunEval] = []
     for path in tqdm(logs_dir.rglob("*run.json")):
         with path.open("r") as f:
-            run_evals.append(get_run_eval(deserialise_run_record(json.load(f))))
+            run_record = deserialise_run_record(json.load(f))
+            run_evals.append(get_run_eval(run_record))
 
-    print(get_group_eval(run_evals[start:end]))
+    group_eval = get_group_eval(run_evals[start:end])
+    print("=" * 60)
+    print(f"Success rate: {group_eval['success_rate']}")
+    print(f"Mean conversation length: {group_eval['mean_conversation_length']}")
+    print(
+        f"Mean conversation length in successful cases: {group_eval['mean_conversation_length_in_successful_cases']}"
+    )
+    print(f"Total input tokens: {group_eval['total_input_tokens']}")
+    print(f"Total output tokens: {group_eval['total_output_tokens']}")
+
+    input_price, output_price = 0.05, 0.2
+    input_cost = input_price * (group_eval["total_input_tokens"] / 1_000_000)
+    output_cost = output_price * (group_eval["total_output_tokens"] / 1_000_000)
+
+    print(f"Total cost: {input_cost} + {output_cost} = {input_cost + output_cost}")
+
+    print("=" * 60)
