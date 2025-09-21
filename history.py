@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
-
 from node import EvidenceNode, QuestionNode
 from question_clustering import Cluster, QuestionClustering
+from voyager import Index
 
 
 @dataclass
@@ -106,7 +106,8 @@ def load_question_clustering(json_path: Path, voyager_path: Path) -> QuestionClu
         )
         clustering.clusters[key] = cluster
 
-    clustering.index = clustering.index.load(str(voyager_path))
+    with voyager_path.open("rb") as f:
+        clustering.index = Index.load(f)
 
     return clustering
 

@@ -1,4 +1,3 @@
-import glob
 from pathlib import Path
 from typing import TypedDict
 
@@ -62,6 +61,7 @@ if __name__ == "__main__":
     import argparse
     from history import deserialise_run_record
     import json
+    from tqdm import tqdm
 
     parser = argparse.ArgumentParser(prog="Experiment evaluator")
     parser.add_argument("-path", "--path", type=Path)
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     end: int = args.end
 
     run_evals: list[RunEval] = []
-    for path in logs_dir.rglob("*run.json"):
+    for path in tqdm(logs_dir.rglob("*run.json")):
         with path.open("r") as f:
             run_evals.append(get_run_eval(deserialise_run_record(json.load(f))))
 

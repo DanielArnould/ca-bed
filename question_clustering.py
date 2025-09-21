@@ -18,7 +18,7 @@ class Cluster:
 
 class QuestionClustering:
     index: Index
-    clusters: dict[int, Cluster]
+    clusters: dict[str, Cluster]
     threshold: float
     model: SentenceTransformer
 
@@ -41,7 +41,7 @@ class QuestionClustering:
         )
 
         if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
-            best_cluster = self.clusters[neighbours[0]]
+            best_cluster = self.clusters[str(neighbours[0])]
             LOGGER.info(
                 f"Cluster found for '{question}', with similarity {1 - distances[0]}!"
             )
@@ -51,7 +51,7 @@ class QuestionClustering:
             return best_cluster
 
         LOGGER.info(f"Cluster not found for '{question}'. Creating new cluster...")
-        idx = self.index.add_item(embedding)
+        idx = str(self.index.add_item(embedding))
         new_cluster = Cluster(
             {question: 1},
             None,
