@@ -12,8 +12,9 @@ from history import (
 from method import Method
 from models import Model
 from question_clustering import QuestionClustering
+from tasks.med_dg.baseline import Baseline
 from tasks.med_dg.bayesian import Bayesian
-from tasks.med_dg.data import MED_DG_SET, load_balanced_data
+from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
 from tasks.task import Task
 
 LOGGER = logging.getLogger("Main")
@@ -73,21 +74,21 @@ async def run_single_task(
 
 async def main() -> None:
     # =============== CONFIG ===============
-    benchmark_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
+    benchmark_model = Model.GPT_OSS_20B
     method_model = Model.GPT_OSS_20B
     sharpness_constant = 0.4
-    max_concurrent = 4
+    max_concurrent = 8
     clustering_threshold = 0.97
-    dataset = load_balanced_data(0.3)
+    dataset = load_balanced_data(0.05)
 
     tasks = [
-        Bayesian(
+        Baseline(
             task_answer=item.disease,
-            max_question_nodes=3,
+            max_question_nodes=2,
             max_lookahead_depth=3,
             max_conversation_depth=5,
             hypothesis_space=MED_DG_SET,
-            confidence_threshold=0.7,
+            # confidence_threshold=0.7,
             self_report=item.self_report,
         )
         for item in dataset

@@ -72,7 +72,7 @@ class Baseline(Task):
             prompt_parts.append(previous_questions_text)
 
         pruned_hypothesis_space = [
-            item for item, prob in current_node.belief_state.items() if prob > 0
+            item for item, prob in current_node.belief_state.items() if prob > 1e-5
         ]
         bullets_pruned_hypothesis = "\n".join(
             f"- {item}" for item in pruned_hypothesis_space
