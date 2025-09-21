@@ -35,6 +35,50 @@ class Bayesian(Task):
         return f"MedDG (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.self_report=}"
 
     @override
+    def get_prior_prompt(self) -> str:
+        return (
+            dedent("""\
+            You are an expert Doctor, you are given this self-report:
+            {self_report}
+            
+            Below is the set of possible conditions the patient may have:
+            {hypothesis_space}
+            
+            Given your knowledge in this area and the given self-report, please assign a prior belief to each 
+            item in the hypothesis set provided above, nothing else. 
+            
+            For example, if our hypothesis space is [A,B,C,D], and C and A are more relevant given the self-report, you 
+            might assign probabilities like below: 
+            A: 0.35, B: 0.02, C: 0.55, D: 0.08
+            
+            Note the probabilities are just conjectures, you should generate reasonable probabilities for each option. 
+            Also note that the sum of these prior probabilities is 1. Please give a probability for each hypothesis even 
+            if they are extremely small.
+            
+            Please strictly return your response in the format below:
+            {{
+                "<Hypothesis 1 full name>": <probability>, 
+                "<Hypothesis 2 full name>": <probability>, 
+                ....
+            }}    
+            """)
+            .format(
+                self_report=self.self_report,
+                hypothesis_space=self.hypothesis_space,
+            )
+            .strip()
+        )
+
+    @override
+    def parse_prior_output(self, output: str) -> dict[str, float]:
+        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
+        probs = json.loads(cleaned_output)
+        adjusted_prior = {h: probs.get(h, 1e-10) for h in self.hypothesis_space}
+        total = sum(adjusted_prior.values())
+        adjusted_prior = {h: v / total for h, v in adjusted_prior.items()}
+        return adjusted_prior
+
+    @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         prompt_parts = []
         history = []

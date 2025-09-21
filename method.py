@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 from functools import partial
 import logging
+from typing_extensions import deprecated
 from history import RunRecord, serialise_tree
 from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
@@ -37,15 +38,23 @@ class Method:
         self.question_clustering = question_clustering
         self.root = EvidenceNode(
             answer="ROOT",
-            belief_state=get_uniform_belief_state(task.hypothesis_space),
+            belief_state={},
             marginal_likelihood=1.0,
         )
         self.total_input_tokens = self.total_output_tokens = 0
-        LOGGER.info(f"Created root node: {str(self.root)}")
 
     async def run(self) -> RunRecord:
         start_time = datetime.now()
         final_path = []
+
+        prior_prompt = self.task.get_prior_prompt()
+        prior_output, input_tokens, output_tokens = await call_llm(
+            prior_prompt, self.method_model
+        )
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.root.belief_state = self.task.parse_prior_output(prior_output)
+        LOGGER.info(f"Created initial belief state: {str(self.root)}")
 
         current_node = self.root
         final_path.append(str(current_node))
@@ -177,6 +186,7 @@ def get_conversation_depth(node: EvidenceNode) -> int:
     return 1 + get_conversation_depth(node.parent.parent)
 
 
+@deprecated("Implement prior estimation per task instead")
 def get_uniform_belief_state(hypothesis_space: list[str]) -> dict[str, float]:
     prob = 1.0 / len(hypothesis_space)
     return {item: prob for item in hypothesis_space}

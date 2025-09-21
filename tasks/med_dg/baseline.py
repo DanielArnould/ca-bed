@@ -1,3 +1,4 @@
+import json
 import re
 from textwrap import dedent
 from typing import override
@@ -31,6 +32,43 @@ class Baseline(Task):
 
     def __str__(self) -> str:
         return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
+
+    @override
+    def get_prior_prompt(self) -> str:
+        return (
+            dedent("""\
+            You are an expert Doctor, you are given this self-report:
+            {self_report}
+            
+            Below is the set of possible conditions the patient may have:
+            {hypothesis_space}
+            
+            Given your knowledge in this area and the given self-report, please pick from the conditions above those
+            which might be relevant, nothing else. You must choose at least 1.
+            
+            Please strictly return your response in the format below:
+            {{
+                "conditions": ["Disease A", "Disease B", ..., "Disease N"]
+            }}    
+            """)
+            .format(
+                self_report=self.self_report,
+                hypothesis_space=self.hypothesis_space,
+            )
+            .strip()
+        )
+
+    @override
+    def parse_prior_output(self, output: str) -> dict[str, float]:
+        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
+        data = json.loads(cleaned_output)
+        relevant_conditions = data["conditions"]
+        adjusted_prior = {
+            h: 1.0 if h in relevant_conditions else 0 for h in self.hypothesis_space
+        }
+        total = sum(adjusted_prior.values())
+        adjusted_prior = {h: v / total for h, v in adjusted_prior.items()}
+        return adjusted_prior
 
     @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
