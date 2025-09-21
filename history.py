@@ -16,7 +16,7 @@ class RunRecord:
     total_input_tokens: int
     total_output_tokens: int
     final_path: list[str]
-    final_answer: str
+    final_belief_state: dict[str, float]
     serialised_tree: dict | None
 
 
@@ -121,7 +121,7 @@ def serialise_run_record(history: RunRecord) -> dict:
         "total_input_tokens": history.total_input_tokens,
         "total_output_tokens": history.total_output_tokens,
         "final_path": history.final_path,
-        "final_answer": history.final_answer,
+        "final_belief_state": history.final_belief_state,
         "tree": history.serialised_tree,
     }
 
@@ -139,5 +139,5 @@ def deserialise_run_record(
         total_output_tokens=history_dict["total_output_tokens"],
         serialised_tree=history_dict["tree"] if include_tree else None,
         final_path=history_dict["final_path"],
-        final_answer=history_dict["final_answer"],
+        final_belief_state=history_dict["final_belief_state"],
     )

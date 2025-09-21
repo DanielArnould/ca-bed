@@ -5,29 +5,37 @@ from history import RunRecord
 
 
 class RunEval(TypedDict):
-    success: bool
+    top1: bool
+    top3: bool
     conversation_length: int
     input_tokens: int
     output_tokens: int
 
 
 class GroupEval(TypedDict):
-    success_rate: float
+    top1: float
+    top3: float
     mean_conversation_length: float
-    mean_conversation_length_in_successful_cases: float
     total_input_tokens: int
     total_output_tokens: int
 
 
 def get_run_eval(run_history: RunRecord) -> RunEval:
-    did_pass = (
-        run_history.true_answer.strip().lower()
-        in run_history.final_answer.strip().lower()
+    guesses = sorted(
+        run_history.final_belief_state.keys(),
+        key=run_history.final_belief_state.__getitem__,
+        reverse=True,
     )
+    top3_guesses = guesses[:3]
+    top1_guesses = guesses[:1]
+
+    top1 = run_history.true_answer in top1_guesses
+    top3 = run_history.true_answer in top3_guesses
 
     conversation_length = len(run_history.final_path) // 2
     return {
-        "success": did_pass,
+        "top1": top1,
+        "top3": top3,
         "conversation_length": conversation_length,
         "input_tokens": run_history.total_input_tokens,
         "output_tokens": run_history.total_output_tokens,
@@ -35,23 +43,19 @@ def get_run_eval(run_history: RunRecord) -> RunEval:
 
 
 def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
-    success_rate = sum(run_eval["success"] for run_eval in run_evals) / len(run_evals)
+    top1 = sum(run_eval["top1"] for run_eval in run_evals) / len(run_evals)
+    top3 = sum(run_eval["top3"] for run_eval in run_evals) / len(run_evals)
     mean_conversation_length = sum(
         run_eval["conversation_length"] for run_eval in run_evals
     ) / len(run_evals)
-
-    succesful_runs = [run_eval for run_eval in run_evals if run_eval["success"]]
-    mean_conversation_length_in_succesful_cases = sum(
-        run_eval["conversation_length"] for run_eval in succesful_runs
-    ) / len(succesful_runs)
 
     total_input_tokens = sum(run_eval["input_tokens"] for run_eval in run_evals)
     total_output_tokens = sum(run_eval["output_tokens"] for run_eval in run_evals)
 
     return {
-        "success_rate": success_rate,
+        "top1": top1,
+        "top3": top3,
         "mean_conversation_length": mean_conversation_length,
-        "mean_conversation_length_in_successful_cases": mean_conversation_length_in_succesful_cases,
         "total_input_tokens": total_input_tokens,
         "total_output_tokens": total_output_tokens,
     }
@@ -81,11 +85,9 @@ if __name__ == "__main__":
 
     group_eval = get_group_eval(run_evals[start:end])
     print("=" * 60)
-    print(f"Success rate: {group_eval['success_rate']}")
+    print(f"Top1: {group_eval['top1']}")
+    print(f"Top3: {group_eval['top3']}")
     print(f"Mean conversation length: {group_eval['mean_conversation_length']}")
-    print(
-        f"Mean conversation length in successful cases: {group_eval['mean_conversation_length_in_successful_cases']}"
-    )
     print(f"Total input tokens: {group_eval['total_input_tokens']}")
     print(f"Total output tokens: {group_eval['total_output_tokens']}")
 
