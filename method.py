@@ -34,11 +34,6 @@ class DPMethod:
         self.method_model = method_model
         self.task = task
         self.perseverance = perseverance
-        self.root = EvidenceNode(
-            answer="ROOT",
-            belief_state={},
-            marginal_likelihood=1.0,
-        )
         self.total_input_tokens = self.total_output_tokens = 0
         self.history = []
 
@@ -65,6 +60,7 @@ class DPMethod:
                 prediction = answer_or_question
                 if self.perseverance and prediction.strip().lower() != self.task.task_answer.strip().lower():
                     LOGGER.info(f"Incorrect prediction at turn {i+1}: {prediction}. Continuing due to perseverance.")
+                    self.history.append((f'Is it {prediction}?', 'No.'))
                     final_path.append(f"INCORRECT PREDICTION: {prediction}")
                     continue
                 else:
@@ -73,7 +69,7 @@ class DPMethod:
                     break
 
             question = answer_or_question
-            final_path.append(f"Q: {question}")
+            final_path.append(f"QUESTION: {question}")
 
             answerer_output, input_tokens, output_tokens = await call_llm(
                 self.task.get_answerer_prompt(question), self.benchmark_model
@@ -83,7 +79,7 @@ class DPMethod:
 
             answer = self.task.parse_answerer_output(answerer_output)
             self.history.append((question, answer))
-            final_path.append(f"A: {answer}")
+            final_path.append(f"ANSWER: {answer}")
 
         end_time = datetime.now()
         LOGGER.info(
@@ -93,6 +89,22 @@ class DPMethod:
         # Create a mock belief state for the RunRecord
         final_belief_state = {final_answer: 1.0} if final_answer else {}
 
+        # Create a tree from the final_path for serialization
+        path_root = EvidenceNode("ROOT", {}, 1.0)
+        current_node = path_root
+        for item in final_path:
+            if item == "START":
+                continue
+            if item.startswith("QUESTION: "):
+                question = item.removeprefix("QUESTION: ")
+                new_node = QuestionNode(question, parent=current_node)
+                current_node.children.append(new_node)
+                current_node = new_node
+            else: # ANSWER, PREDICTION, INCORRECT PREDICTION
+                new_node = EvidenceNode(item, {}, 1.0, parent=current_node)
+                current_node.children.append(new_node)
+                current_node = new_node
+
 
         return RunRecord(
             task_info=str(self.task),
@@ -101,7 +113,7 @@ class DPMethod:
             end_time=end_time,
             total_input_tokens=self.total_input_tokens,
             total_output_tokens=self.total_output_tokens,
-            serialised_tree=serialise_tree(self.root),
+            serialised_tree=serialise_tree(path_root),
             final_path=final_path,
             final_belief_state=final_belief_state,
         )
