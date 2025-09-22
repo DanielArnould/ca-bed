@@ -2,10 +2,11 @@ import re
 from textwrap import dedent
 from typing import override
 
-from tasks.task import DPTask
+from node import EvidenceNode
+from tasks.direct_prompting_task import DirectPromptingTask, NaiveQuestionerResponse
 
 
-class Direct(DPTask):
+class Direct(DirectPromptingTask):
     self_report: str
 
     def __init__(
@@ -24,9 +25,15 @@ class Direct(DPTask):
         return f"MedDG (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
 
     @override
-    def get_questioner_prompt(self, history: list[tuple[str, str]]) -> str:
+    def get_questioner_prompt(self, current_node: EvidenceNode) -> str:
+        history: list[tuple[str, str]] = []
+        while current_node.parent:
+            history.append((current_node.parent.question, current_node.answer))
+            current_node = current_node.parent.parent
+
+        history.reverse()
         possible_diseases = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
-        
+
         base_prompt = dedent("""\
             You are an expert medical doctor. Your patient self-reports that: {self_report}. 
                
@@ -40,50 +47,46 @@ class Direct(DPTask):
 
             Otherwise, if you need more information, output:
             [QUESTION]: <Your question here>
-            
-            The questions should be answerable with 'Yes' or 'No'.
             """)
-        
+
         if history:
             conversation_history = "\n".join(f"Q: {q}\nA: {a}" for q, a in history)
             return (
-                base_prompt.format(self_report=self.self_report, possible_diseases=possible_diseases) +
-                "\n\nHere is the conversation history so far:\n" +
-                conversation_history
+                base_prompt.format(
+                    self_report=self.self_report, possible_diseases=possible_diseases
+                )
+                + "\n\nHere is the conversation history so far:\n"
+                + conversation_history
             ).strip()
 
-        return base_prompt.format(self_report=self.self_report, possible_diseases=possible_diseases).strip()
+        return base_prompt.format(
+            self_report=self.self_report, possible_diseases=possible_diseases
+        ).strip()
 
     @override
-    def parse_questioner_output(self, output: str) -> tuple[bool, str]:
+    def parse_questioner_output(
+        self, output: str
+    ) -> tuple[NaiveQuestionerResponse, str]:
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
         prediction_match = re.search(r"\[PREDICTION\]:\s*(.*)", output, re.IGNORECASE)
 
         if question_match:
-            return False, question_match.group(1).strip()
+            return NaiveQuestionerResponse.QUESTION, question_match.group(1).strip()
         elif prediction_match:
             prediction = prediction_match.group(1).strip()
-
-            assert any(prediction.lower() == label.strip().lower() for label in self.hypothesis_space), RuntimeError(f'{prediction} is not part of the hypothesis space')
-            return True, prediction
+            return NaiveQuestionerResponse.PREDICTION, prediction
         else:
-            # Default to interpreting the output as a question if no tag is found
-            return False, output.strip()
+            raise RuntimeError(f"Response does not match expected structure, {output}")
 
     @override
     def get_answerer_prompt(self, question: str) -> str:
         return (
             dedent("""\
             You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            ONLY ANSWER WITH YES OR NO.
+            I will ask you questions, and you should answer each one truthfully based on your disease.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question)
             .strip()
         )
-
-    @override
-    def parse_answerer_output(self, output: str) -> str:
-        return output.strip()

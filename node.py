@@ -26,6 +26,13 @@ class QuestionNode:
         return f"Question: {self.question}"
 
 
+def get_conversation_depth(node: EvidenceNode) -> int:
+    if node.parent is None:
+        return 0
+
+    return 1 + get_conversation_depth(node.parent.parent)
+
+
 def stringify(root: EvidenceNode) -> str:
     lines = []
 

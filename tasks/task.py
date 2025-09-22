@@ -2,27 +2,6 @@ from abc import ABC, abstractmethod
 from node import EvidenceNode, QuestionNode
 
 
-class DPTask(ABC):
-    task_answer: str
-    max_conversation_depth: int
-    hypothesis_space: list[str]
-
-    @abstractmethod
-    def get_questioner_prompt(self, history: list[tuple[str, str]]) -> str:
-        pass
-
-    @abstractmethod
-    def get_answerer_prompt(self, question: str) -> str:
-        pass
-
-    @abstractmethod
-    def parse_questioner_output(self, output: str) -> tuple[bool, str]: # returns [True | False] depending on whether the questioner has attempted to predict the answer, [Answer | Follow-up Question]
-        pass
-
-    @abstractmethod
-    def parse_answerer_output(self, output: str) -> str: # returns the answer as a string
-        pass
-
 class Task(ABC):
     """Abstract base class for all tasks that can be solved by UoT methods.
     Prompts and parsers are separated so that LLM calls remain independent of
