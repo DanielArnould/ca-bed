@@ -145,7 +145,7 @@ class DirectPromptingMethod:
         prediction_weight = 1.0 / self.prediction_count
 
         posterior = prior_belief_state.copy()
-        posterior[prediction] += posterior.get(prediction, 0) + prediction_weight
+        posterior[prediction] = posterior.get(prediction, 0) + prediction_weight
 
         # Normalise to ensure probabilities sum to 1
         total_probability = sum(posterior.values())
