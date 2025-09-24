@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+from direct_prompting_method import DirectPromptingMethod
 from history import (
     load_question_clustering,
     save_question_clustering,
@@ -12,9 +13,11 @@ from history import (
 from method import Method
 from models import Model
 from question_clustering import QuestionClustering
+from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.med_dg.baseline import Baseline
 from tasks.med_dg.bayesian import Bayesian
 from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
+from tasks.med_dg.direct import Direct
 from tasks.task import Task
 
 LOGGER = logging.getLogger("Main")
@@ -32,6 +35,34 @@ def setup_logging(output_dir: Path) -> None:
     )
 
 
+async def run_single_direct_prompting_task(
+    idx: int,
+    task: DirectPromptingTask,
+    output_dir: Path,
+    semaphore: asyncio.Semaphore,
+    benchmark_model: Model,
+    method_model: Model,
+) -> None:
+    async with semaphore:
+        method = DirectPromptingMethod(
+            benchmark_model,
+            method_model,
+            task,
+        )
+        history = await method.run()
+
+        LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
+
+        run_history_path = output_dir / f"{idx}_run.json"
+        with run_history_path.open("w") as f:
+            json.dump(serialise_run_record(history), f)
+
+        LOGGER.info(f"[{idx}] Run saved to {output_dir}")
+        LOGGER.info(
+            f"[{idx}] Total input tokens: {history.total_input_tokens} Total output tokens: {history.total_output_tokens}"
+        )
+
+
 async def run_single_task(
     idx: int,
     task: Task,
@@ -44,11 +75,7 @@ async def run_single_task(
 ) -> None:
     async with semaphore:
         method = Method(
-            benchmark_model,
-            method_model,
-            sharpness_constant,
-            task,
-            question_clustering,
+            benchmark_model, method_model, sharpness_constant, task, question_clustering
         )
         history = await method.run()
 
@@ -77,19 +104,16 @@ async def main() -> None:
     benchmark_model = Model.GPT_OSS_20B
     method_model = Model.GPT_OSS_20B
     sharpness_constant = 0.4
-    max_concurrent = 8
+    max_concurrent = 1
     clustering_threshold = 0.97
-    dataset = load_balanced_data(0.05)
+    dataset = load_balanced_data(0.1)
 
     tasks = [
-        Baseline(
+        Direct(
             task_answer=item.disease,
-            max_question_nodes=2,
-            max_lookahead_depth=3,
-            max_conversation_depth=5,
             hypothesis_space=MED_DG_SET,
-            # confidence_threshold=0.7,
             self_report=item.self_report,
+            max_conversation_depth=5,
         )
         for item in dataset
     ]
@@ -100,31 +124,29 @@ async def main() -> None:
     setup_logging(output_dir)
 
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    question_clustering = QuestionClustering(clustering_threshold)
+    # question_clustering = QuestionClustering(clustering_threshold)
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
     await asyncio.gather(
         *[
-            run_single_task(
+            run_single_direct_prompting_task(
                 i,
                 task,
                 output_dir,
                 semaphore,
                 benchmark_model=benchmark_model,
                 method_model=method_model,
-                sharpness_constant=sharpness_constant,
-                question_clustering=question_clustering,
             )
             for i, task in enumerate(tasks)
         ]
     )
 
-    save_question_clustering(
-        question_clustering,
-        output_dir / "final_cluster.json",
-        output_dir / "final_cluster.voy",
-    )
+    # save_question_clustering(
+    #     question_clustering,
+    #     output_dir / "final_cluster.json",
+    #     output_dir / "final_cluster.voy",
+    # )
     LOGGER.info("All runs completed successfully!")
 
 

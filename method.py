@@ -2,10 +2,9 @@ import asyncio
 from datetime import datetime
 from functools import partial
 import logging
-from typing_extensions import deprecated
 from history import RunRecord, serialise_tree
 from models import Model, call_llm
-from node import EvidenceNode, QuestionNode
+from node import EvidenceNode, QuestionNode, get_conversation_depth
 from question_clustering import QuestionClustering
 from rewards import expected_reward
 from tasks.task import Task
@@ -177,16 +176,3 @@ class Method:
             prob >= self.task.confidence_threshold
             for prob in node.belief_state.values()
         )
-
-
-def get_conversation_depth(node: EvidenceNode) -> int:
-    if node.parent is None:
-        return 0
-
-    return 1 + get_conversation_depth(node.parent.parent)
-
-
-@deprecated("Implement prior estimation per task instead")
-def get_uniform_belief_state(hypothesis_space: list[str]) -> dict[str, float]:
-    prob = 1.0 / len(hypothesis_space)
-    return {item: prob for item in hypothesis_space}
