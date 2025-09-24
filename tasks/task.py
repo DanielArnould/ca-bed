@@ -40,14 +40,6 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def get_prior_prompt(self) -> str:
-        pass
-
-    @abstractmethod
-    def parse_prior_output(self, output: str) -> dict[str, float]:
-        pass
-
-    @abstractmethod
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         """
         From the current node, create a prompt that asks for new questions
