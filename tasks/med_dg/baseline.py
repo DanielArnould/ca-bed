@@ -83,6 +83,8 @@ class Baseline(Task):
             history.append((question, answer))
             node = node.parent.parent
 
+        history.reverse()
+
         possible_diseases = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
         prologue = (
             dedent("""\
