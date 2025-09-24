@@ -61,7 +61,8 @@ class DirectPromptingMethod:
         while not self.is_terminal(self.current_node):
             # Get response from questioner model
             questioner_output, input_tokens, output_tokens = await call_llm(
-                self.task.get_questioner_prompt(self.current_node), self.method_model
+                self.task.get_questioner_prompt(self.current_node),
+                self.method_model,
             )
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
