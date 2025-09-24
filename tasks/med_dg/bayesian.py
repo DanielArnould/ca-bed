@@ -3,6 +3,7 @@ import re
 from textwrap import dedent
 from typing import override
 
+from models import Model, call_llm
 from node import EvidenceNode, QuestionNode
 from tasks.task import Task
 
@@ -35,8 +36,8 @@ class Bayesian(Task):
         return f"MedDG (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.self_report=}"
 
     @override
-    def get_prior_prompt(self) -> str:
-        return (
+    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
+        prompt = (
             dedent("""\
             You are an expert Doctor, you are given this self-report:
             {self_report}
@@ -69,14 +70,14 @@ class Bayesian(Task):
             .strip()
         )
 
-    @override
-    def parse_prior_output(self, output: str) -> dict[str, float]:
+        output, input_tokens, output_tokens = await call_llm(prompt, model)
         cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
-        probs = json.loads(cleaned_output)
+        probs: dict = json.loads(cleaned_output)
         adjusted_prior = {h: probs.get(h, 1e-10) for h in self.hypothesis_space}
         total = sum(adjusted_prior.values())
         adjusted_prior = {h: v / total for h, v in adjusted_prior.items()}
-        return adjusted_prior
+
+        return EvidenceNode("ROOT", adjusted_prior, 1.0), input_tokens, output_tokens
 
     @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from models import Model
 from node import EvidenceNode, QuestionNode
 
 
@@ -32,6 +33,11 @@ class Task(ABC):
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold
         self.hypothesis_space = hypothesis_space
+
+    @abstractmethod
+    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
+        # Returns (root, input_tokens, output_tokens)
+        pass
 
     @abstractmethod
     def get_prior_prompt(self) -> str:

@@ -35,25 +35,19 @@ class Method:
         self.sharpness_constant = sharpness_constant
         self.task = task
         self.question_clustering = question_clustering
-        self.root = EvidenceNode(
-            answer="ROOT",
-            belief_state={},
-            marginal_likelihood=1.0,
-        )
         self.total_input_tokens = self.total_output_tokens = 0
 
     async def run(self) -> RunRecord:
         start_time = datetime.now()
         final_path = []
 
-        prior_prompt = self.task.get_prior_prompt()
-        prior_output, input_tokens, output_tokens = await call_llm(
-            prior_prompt, self.method_model
+        self.root, input_tokens, output_tokens = await self.task.create_root(
+            self.method_model
         )
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
-        self.root.belief_state = self.task.parse_prior_output(prior_output)
-        LOGGER.info(f"Created initial belief state: {str(self.root)}")
+
+        LOGGER.info(f"Created root: {str(self.root)}")
 
         current_node = self.root
         final_path.append(str(current_node))
