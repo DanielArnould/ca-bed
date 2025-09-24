@@ -40,7 +40,8 @@ class Direct(DirectPromptingTask):
             The patient is suffering from one of the following possible diseases:      
             {possible_diseases}
     
-            Your goal is to identify the correct disease. You can either ask a yes/no question to gather more information, or you can make a prediction.
+            Your goal is to identify the correct disease.
+            You can either ask a yes/no question to gather more information, or you can make a prediction.
             
             If you are confident enough to make a prediction, output:
             [PREDICTION]: <This should ONLY be the exact name of the disease from the list of possible diseases>
@@ -49,18 +50,25 @@ class Direct(DirectPromptingTask):
             [QUESTION]: <Your question here>
             """)
 
-        if history:
-            conversation_history = "\n".join(f"Q: {q}\nA: {a}" for q, a in history)
-            return (
-                base_prompt.format(
-                    self_report=self.self_report, possible_diseases=possible_diseases
-                )
-                + "\n\nHere is the conversation history so far:\n"
-                + conversation_history
+        if not history:
+            return base_prompt.format(
+                self_report=self.self_report,
+                possible_diseases=possible_diseases,
             ).strip()
 
-        return base_prompt.format(
-            self_report=self.self_report, possible_diseases=possible_diseases
+        conversation_history = "\n".join(f"Q: {q}\nA: {a}" for q, a in history)
+        return (
+            base_prompt.format(
+                self_report=self.self_report,
+                possible_diseases=possible_diseases,
+            )
+            + "\n\nHere is the conversation history so far:\n"
+            + conversation_history
+            + (
+                "\n\nNow you should make predicitions instead of asking questions\n"
+                if len(history) >= 3
+                else ""
+            )
         ).strip()
 
     @override
@@ -68,12 +76,14 @@ class Direct(DirectPromptingTask):
         self, output: str
     ) -> tuple[NaiveQuestionerResponse, str]:
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
-        prediction_match = re.search(r"\[PREDICTION\]:\s*(.*)", output, re.IGNORECASE)
+        prediction_match = re.search(
+            r"\[(PREDICTION|ANSWER)\]:\s*(.*)", output, re.IGNORECASE
+        )
 
         if question_match:
             return NaiveQuestionerResponse.QUESTION, question_match.group(1).strip()
         elif prediction_match:
-            prediction = prediction_match.group(1).strip()
+            prediction = prediction_match.group(2).strip()
             return NaiveQuestionerResponse.PREDICTION, prediction
         else:
             raise RuntimeError(f"Response does not match expected structure, {output}")
