@@ -1,6 +1,7 @@
 import re
 from textwrap import dedent
 from typing import override
+from models import Model
 from node import EvidenceNode, QuestionNode
 from tasks.task import Task
 
@@ -28,6 +29,15 @@ class Baseline(Task):
         return f"Twenty Questions (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=}"
 
     @override
+    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
+        uniform_probability = 1.0 / len(self.hypothesis_space)
+        uniform_prior = {
+            hypothesis: uniform_probability for hypothesis in self.hypothesis_space
+        }
+
+        return EvidenceNode("ROOT", uniform_prior, 1.0), 0, 0
+
+    @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         history = []
         node = current_node
@@ -37,6 +47,8 @@ class Baseline(Task):
             history.append((question, answer))
             node = node.parent.parent
 
+        history.reverse()
+
         prologue = dedent("""
             You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
             You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
@@ -45,7 +57,7 @@ class Baseline(Task):
 
         bullets_history = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
         pruned_hypothesis = [
-            item for item, prob in current_node.belief_state.items() if prob > 0
+            item for item, prob in current_node.belief_state.items() if prob > 1e-5
         ]
         bullets_pruned_hypothesis = "\n".join(f"- {item}" for item in pruned_hypothesis)
 
@@ -75,7 +87,7 @@ class Baseline(Task):
             The game has proceeded as follows:
             {history}
 
-            Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
+            Based on our current beliefs, the secret object is most likely one of the following itemss:
             {belief}
 
             Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
@@ -92,11 +104,6 @@ class Baseline(Task):
             )
             .strip()
         )
-
-        # TODO: Investigate targeting prompts
-        # target_prompt = ""
-        # if get_conversation_depth(current_node) >= 14:
-        #     target_prompt = baseline_prompts.get_targeting_prompt()
 
         return f"{prologue}\n\n{generation_prompt}"
 
@@ -157,24 +164,12 @@ class Baseline(Task):
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""
-            You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
             I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question_node.question)
             .strip()
-        )
-
-    @override
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        assert False, (
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )

@@ -2,6 +2,7 @@ import json
 import re
 from textwrap import dedent
 from typing import override
+from models import Model
 from node import EvidenceNode, QuestionNode
 from tasks.task import Task
 
@@ -30,6 +31,15 @@ class Bayesian(Task):
         return f"Twenty Questions (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
 
     @override
+    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
+        uniform_probability = 1.0 / len(self.hypothesis_space)
+        uniform_prior = {
+            hypothesis: uniform_probability for hypothesis in self.hypothesis_space
+        }
+
+        return EvidenceNode("ROOT", uniform_prior, 1.0), 0, 0
+
+    @override
     def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
         history = []
         node = current_node
@@ -38,6 +48,8 @@ class Bayesian(Task):
             answer = node.answer
             history.append((question, answer))
             node = node.parent.parent
+
+        history.reverse()
 
         bullets = "\n".join(f"- {h}" for h in self.hypothesis_space)
         prologue = (
@@ -131,7 +143,7 @@ class Bayesian(Task):
 
             Please provide your response ONLY as a single JSON object. The keys should be the item names and the values should be the estimated probability (a float between 0.0 and 1.0).
 
-            Example format for the question "Is it an animal?":
+            Example format for the question "Is it an animal?" (THE FOLLOWING PROBABILITIES ARE HYPOTHETICAL):
             {{
             "Dog": 0.99,
             "Cookie": 0.0,
@@ -155,25 +167,12 @@ class Bayesian(Task):
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
         return (
             dedent("""
-            You are an expert player of the 20 Questions game. Your goal is to impersonate the secret object, X. I will be trying to guess the secret object, X. X is {target_item}.
-            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'. Note that you must never reveal X, until I guess it correctly.
-            If I guess X correctly in my question, directly respond 'You guessed it. X is {target_item}.' instead of saying 'Yes'.
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
+            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
             .format(target_item=self.task_answer, question=question_node.question)
             .strip()
-        )
-
-    @override
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        assert False, (
-            f"No matching answer selected. Possible answers: {list(child.answer for child in question_node.children)} Actual answer: {llm_answer}"
         )

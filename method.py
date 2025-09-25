@@ -155,12 +155,13 @@ class Method:
             likelihood = likelihoods.get(hypo, 1.0)
             if hypo not in likelihoods:
                 LOGGER.warning(f"{hypo} not found in likelihoods! Defaulting to 1...")
-            unnormalised_posterior[hypo] = max(prior_belief * likelihood, 1e-10)
+            unnormalised_posterior[hypo] = max(prior_belief * likelihood, 0)
 
         # Calculate marginal (normalisation constant)
         marginal = sum(unnormalised_posterior.values())
         posterior = {
-            hypo: (prob / marginal) for hypo, prob in unnormalised_posterior.items()
+            hypo: (prob / max(marginal, 1e-10))
+            for hypo, prob in unnormalised_posterior.items()
         }
 
         return posterior, marginal

@@ -106,7 +106,7 @@ Food = [
     "Salmon",
     "Bubble tea",
     "Bok choy",
-    "S'mores",
+    "Smores",
     "Apple pie",
     "Sweet potato",
 ]
