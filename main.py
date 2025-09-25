@@ -14,11 +14,16 @@ from method import Method
 from models import Model
 from question_clustering import QuestionClustering
 from tasks.direct_prompting_task import DirectPromptingTask
-from tasks.med_dg.baseline import Baseline
-from tasks.med_dg.bayesian import Bayesian
-from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
-from tasks.med_dg.direct import Direct
+from tasks.twenty_questions.bayesian import Bayesian
+from tasks.twenty_questions.baseline import Baseline
 from tasks.task import Task
+from tasks.twenty_questions.data import (
+    BIG_BENCH_CONCEPT,
+    Animals,
+    Food,
+    Objects,
+    Places,
+)
 
 LOGGER = logging.getLogger("Main")
 
@@ -106,14 +111,16 @@ async def main() -> None:
     sharpness_constant = 0.4
     max_concurrent = 1
     clustering_threshold = 0.97
-    dataset = load_balanced_data(0.1)
+    dataset = Places
 
     tasks = [
-        Direct(
-            task_answer=item.disease,
-            hypothesis_space=MED_DG_SET,
-            self_report=item.self_report,
-            max_conversation_depth=5,
+        Baseline(
+            task_answer=item,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
+            max_conversation_depth=20,
+            # confidence_threshold=0.7,
+            hypothesis_space=dataset,
         )
         for item in dataset
     ]
@@ -124,29 +131,31 @@ async def main() -> None:
     setup_logging(output_dir)
 
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    # question_clustering = QuestionClustering(clustering_threshold)
+    question_clustering = QuestionClustering(clustering_threshold)
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
     await asyncio.gather(
         *[
-            run_single_direct_prompting_task(
+            run_single_task(
                 i,
                 task,
                 output_dir,
                 semaphore,
                 benchmark_model=benchmark_model,
                 method_model=method_model,
+                sharpness_constant=sharpness_constant,
+                question_clustering=question_clustering,
             )
             for i, task in enumerate(tasks)
         ]
     )
 
-    # save_question_clustering(
-    #     question_clustering,
-    #     output_dir / "final_cluster.json",
-    #     output_dir / "final_cluster.voy",
-    # )
+    save_question_clustering(
+        question_clustering,
+        output_dir / "final_cluster.json",
+        output_dir / "final_cluster.voy",
+    )
     LOGGER.info("All runs completed successfully!")
 
 
