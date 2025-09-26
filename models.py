@@ -53,7 +53,7 @@ class Model(Enum):
     DUMMY = ("dummy", "dummy", {})
 
 
-@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=360))
+@retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=60))
 async def call_llm(input_text: str, model: Model) -> tuple[str, int, int]:
     """Returns (response, prompt token count, completion token count)"""
 
