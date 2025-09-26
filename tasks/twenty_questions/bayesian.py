@@ -1,10 +1,13 @@
 import json
+import logging
 import re
 from textwrap import dedent
 from typing import override
 from models import Model
 from node import EvidenceNode, QuestionNode
 from tasks.task import Task
+
+LOGGER = logging.getLogger("Task")
 
 
 class Bayesian(Task):
@@ -54,10 +57,8 @@ class Bayesian(Task):
         bullets = "\n".join(f"- {h}" for h in self.hypothesis_space)
         prologue = (
             dedent("""
-                You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X. X is possibly one of the following:
-                {hypothesis}
+                You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
                 You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
-                Let us begin. Ask me the first question.
             """)
             .format(hypothesis=bullets)
             .strip()
@@ -75,7 +76,30 @@ class Bayesian(Task):
                 Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
                 {belief}
 
-                Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+                Your task is to generate at most {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+                Format your response in this structure:
+                1. <Question 1>
+                2. <Question 2>
+                ...
+                n. <Question n>
+                """)
+                .format(
+                    history=bullets_history,
+                    belief=bullets_belief,
+                    num_questions=self.max_question_nodes,
+                )
+                .strip()
+            )
+        else:
+            generation_prompt = (
+                dedent("""
+                The game has proceeded as follows:
+                {history}
+
+                Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
+                {belief}
+
+                Your task is to generate at most {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
                 1. <Question 1>
                 2. <Question 2>
@@ -90,29 +114,6 @@ class Bayesian(Task):
                 .strip()
             )
 
-        generation_prompt = (
-            dedent("""
-            The game has proceeded as follows:
-            {history}
-
-            Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
-            {belief}
-
-            Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
-            Format your response in this structure:
-            1. <Question 1>
-            2. <Question 2>
-            ...
-            n. <Question n>
-            """)
-            .format(
-                history=bullets_history,
-                belief=bullets_belief,
-                num_questions=self.max_question_nodes,
-            )
-            .strip()
-        )
-
         return f"{prologue}\n\n{generation_prompt}"
 
     @override
@@ -120,14 +121,18 @@ class Bayesian(Task):
         question_texts: list[str] = re.findall(
             r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
         )
-        return [
+        questions = [
             question_text.strip().replace("?", "") + "?"
             for question_text in question_texts
         ]
+        assert len(questions) > 0, "No questions generated!"
+        return questions
 
     @override
-    def get_likelihood_elicitation_prompt(self, question: str) -> str:
-        bullets = "\n".join(f"- {h}" for h in self.hypothesis_space)
+    def get_likelihood_elicitation_prompt(self, question_node: QuestionNode) -> str:
+        bullets = "\n".join(
+            f"- {h}" for h in list(question_node.parent.belief_state.keys())
+        )
 
         return (
             dedent("""
@@ -151,7 +156,7 @@ class Bayesian(Task):
             "Hat": 0.0
             }}
             """)
-            .format(hypothesis=bullets, candidate_question=question)
+            .format(hypothesis=bullets, candidate_question=question_node.question)
             .strip()
         )
 
@@ -160,8 +165,22 @@ class Bayesian(Task):
         self, output: str
     ) -> dict[str, dict[str, float]]:
         cleaned_output = output[output.find("{") : output.rfind("}") + 1]
-        probs = json.loads(cleaned_output)
-        return {"Yes": probs, "No": {item: 1 - prob for item, prob in probs.items()}}
+        probs: dict = json.loads(cleaned_output)
+        confidence_in_val = 1.0
+        likelihoods = {
+            item: {
+                "Yes": (
+                    adjusted_prob := (
+                        (confidence_in_val * max(min(prob, 1 - (1e-10)), 1e-10))
+                        + (1 - confidence_in_val) * 0.5
+                    )
+                ),
+                "No": 1 - adjusted_prob,
+            }
+            for item, prob in probs.items()
+        }
+        assert len(likelihoods) > 0, f"Likelihoods empty! {output}"
+        return likelihoods
 
     @override
     def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:

@@ -60,6 +60,7 @@ class Method:
                     expected_reward, sharpness_constant=self.sharpness_constant
                 ),
             )
+
             LOGGER.info(f"Selected question node: {str(best_question_node)}")
             final_path.append(str(best_question_node))
 
@@ -119,20 +120,44 @@ class Method:
             cluster = self.question_clustering.get_cluster(curr.question)
 
             async with cluster.lock:
-                if cluster.likelihoods is None:
+                # Get keys that are not already in likelihoods
+                all_keys = set(curr.parent.belief_state.keys())
+                existing_keys = set(cluster.likelihoods.keys())
+                missing_keys = all_keys - existing_keys
+
+                if missing_keys:
                     output, input_tokens, output_tokens = await call_llm(
-                        self.task.get_likelihood_elicitation_prompt(curr.question),
+                        self.task.get_likelihood_elicitation_prompt(curr),
                         self.method_model,
                     )
                     self.total_input_tokens += input_tokens
                     self.total_output_tokens += output_tokens
-                    cluster.likelihoods = self.task.parse_likelihood_elicitation_output(
+                    new_likelihoods = self.task.parse_likelihood_elicitation_output(
                         output
                     )
 
-            for answer, likelihoods in cluster.likelihoods.items():
+                    # Merge new likelihoods with existing ones
+                    cluster.likelihoods.update(new_likelihoods)
+                    assert len(cluster.likelihoods) > 0
+
+            # Get all possible answers from the likelihoods
+            all_answers = set()
+            for hypo_likelihoods in cluster.likelihoods.values():
+                all_answers.update(hypo_likelihoods.keys())
+
+            assert len(all_answers) == 2, str(cluster.likelihoods) + str(
+                curr.parent.belief_state
+            )
+            # Create evidence nodes for each possible answer
+            for answer in all_answers:
+                # Extract likelihoods for this specific answer across all hypotheses
+                answer_likelihoods = {
+                    hypo: hypo_likelihoods.get(answer, 1.0)
+                    for hypo, hypo_likelihoods in cluster.likelihoods.items()
+                }
+
                 posterior, marginal = self.calculate_posterior(
-                    curr.parent.belief_state, likelihoods
+                    curr.parent.belief_state, answer_likelihoods
                 )
                 evidence_node = EvidenceNode(
                     answer=answer,
@@ -151,20 +176,33 @@ class Method:
     ) -> tuple[dict[str, float], float]:
         # Calculate unnormalised posterior: P(hypothesis) * P(evidence|hypothesis)
         unnormalised_posterior: dict[str, float] = {}
+        all_posteriors: dict[str, float] = {}  # Keep track of all computed values
+
         for hypo, prior_belief in prior.items():
             likelihood = likelihoods.get(hypo, 1.0)
             if hypo not in likelihoods:
                 LOGGER.warning(f"{hypo} not found in likelihoods! Defaulting to 1...")
-            unnormalised_posterior[hypo] = max(prior_belief * likelihood, 0)
+            posterior_belief = prior_belief * likelihood
+            all_posteriors[hypo] = posterior_belief
+
+            if posterior_belief >= 0.001:
+                unnormalised_posterior[hypo] = posterior_belief
+
+        # Ensure unnormalised_posterior has at least size 1
+        if len(unnormalised_posterior) == 0:
+            # Find the hypothesis with the maximum posterior value
+            max_hypo = max(all_posteriors.keys(), key=lambda h: all_posteriors[h])
+            unnormalised_posterior[max_hypo] = all_posteriors[max_hypo]
 
         # Calculate marginal (normalisation constant)
         marginal = sum(unnormalised_posterior.values())
-        posterior = {
-            hypo: (prob / max(marginal, 1e-10))
-            for hypo, prob in unnormalised_posterior.items()
+
+        # Calculate normalised posterior
+        normalized_posterior = {
+            hypo: (prob / marginal) for hypo, prob in unnormalised_posterior.items()
         }
 
-        return posterior, marginal
+        return normalized_posterior, marginal
 
     def is_terminal(self, node: EvidenceNode) -> bool:
         return get_conversation_depth(node) >= self.task.max_conversation_depth or any(

@@ -11,8 +11,8 @@ LOGGER = logging.getLogger("Question Clustering")
 @dataclass
 class Cluster:
     questions: dict[str, int]
-    # Answer -> hypothesis -> likelihood
-    likelihoods: dict[str, dict[str, float]] | None
+    # hypothesis -> answer -> likelihood
+    likelihoods: dict[str, dict[str, float]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=lambda: asyncio.Lock())
 
 
@@ -54,7 +54,6 @@ class QuestionClustering:
         idx = str(self.index.add_item(embedding))
         new_cluster = Cluster(
             {question: 1},
-            None,
         )
         self.clusters[idx] = new_cluster
         return new_cluster

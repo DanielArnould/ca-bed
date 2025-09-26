@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
+import random
 
 from direct_prompting_method import DirectPromptingMethod
 from history import (
@@ -19,6 +20,8 @@ from tasks.twenty_questions.baseline import Baseline
 from tasks.task import Task
 from tasks.twenty_questions.data import (
     BIG_BENCH_CONCEPT,
+    COMMON,
+    THING200,
     Animals,
     Food,
     Objects,
@@ -111,18 +114,19 @@ async def main() -> None:
     sharpness_constant = 0.4
     max_concurrent = 1
     clustering_threshold = 0.97
-    dataset = Places
+    dataset = COMMON
+    random.seed(42)
 
     tasks = [
-        Baseline(
+        Bayesian(
             task_answer=item,
             max_question_nodes=2,
             max_lookahead_depth=3,
             max_conversation_depth=20,
-            # confidence_threshold=0.7,
+            confidence_threshold=0.7,
             hypothesis_space=dataset,
         )
-        for item in dataset
+        for item in random.sample(dataset, 10)[2:]
     ]
 
     # =============== EXECUTION ===============
@@ -131,7 +135,11 @@ async def main() -> None:
     setup_logging(output_dir)
 
     LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    question_clustering = QuestionClustering(clustering_threshold)
+    # question_clustering = QuestionClustering(clustering_threshold)
+    question_clustering = load_question_clustering(
+        Path("logs/20250926202621/1_cluster.json"),
+        Path("logs/20250926202621/1_cluster.voy"),
+    )
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -147,7 +155,7 @@ async def main() -> None:
                 sharpness_constant=sharpness_constant,
                 question_clustering=question_clustering,
             )
-            for i, task in enumerate(tasks)
+            for i, task in enumerate(tasks, start=2)
         ]
     )
 
