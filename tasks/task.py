@@ -52,7 +52,7 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def get_likelihood_elicitation_prompt(self, question: str) -> str:
+    def get_likelihood_elicitation_prompt(self, question_node: QuestionNode) -> str:
         """
         Given a question, create a prompt that asks for the likelihoods for every hypothesis for every answer
         """
