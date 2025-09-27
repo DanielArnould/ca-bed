@@ -31,6 +31,12 @@ class Cluster:
 
         return list(first_keys)
 
+    def get_likelihoods_for_answer(self, answer: str) -> dict[str, float]:
+        return {
+            hypo: hypo_likelihoods[answer]
+            for hypo, hypo_likelihoods in self.likelihoods.items()
+        }
+
 
 class QuestionClustering:
     index: Index
