@@ -75,7 +75,7 @@ async def call_llm(input_text: str, model: Model) -> tuple[str, int, int]:
         messages=[{"role": "user", "content": input_text}],
         max_tokens=4096,
         temperature=0,
-        n=1,
+        # n=1, Disabled to prevent evendless reasoning tokens.
         stream=False,
         **kwargs,  # type: ignore
     )
