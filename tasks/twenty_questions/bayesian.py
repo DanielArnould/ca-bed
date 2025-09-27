@@ -106,12 +106,10 @@ class Bayesian(Task):
 
     @override
     async def get_likelihoods(
-        self, current_node: QuestionNode
+        self, question: str, hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
-        hypotheses = "\n".join(
-            f"- {h}" for h in current_node.parent.belief_state.keys()
-        )
+        hypotheses_formatted = "\n".join(f"- {h}" for h in hypotheses)
 
         prompt = (
             dedent("""
@@ -135,7 +133,10 @@ class Bayesian(Task):
             "Hat": 0.0
             }}
             """)
-            .format(candidate_question=current_node.question, hypotheses=hypotheses)
+            .format(
+                candidate_question=question,
+                hypotheses=hypotheses_formatted,
+            )
             .strip()
         )
 
