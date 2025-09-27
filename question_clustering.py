@@ -5,7 +5,7 @@ import logging
 from sentence_transformers import SentenceTransformer
 from voyager import Index, Space
 
-LOGGER = logging.getLogger("Question Clustering")
+logger = logging.getLogger("Question Clustering")
 
 
 @dataclass
@@ -15,6 +15,22 @@ class Cluster:
     likelihoods: dict[str, dict[str, float]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=lambda: asyncio.Lock())
 
+    def get_hypotheses(self) -> list[str]:
+        return list(self.likelihoods.keys())
+
+    def get_answers(self) -> list[str]:
+        if not self.likelihoods:
+            return []
+
+        it = iter(self.likelihoods.values())
+        first_keys = set(next(it).keys())
+
+        assert all(set(answers.keys()) == first_keys for answers in it), (
+            "Hypotheses in cluster do not have consistent answers!"
+        )
+
+        return list(first_keys)
+
 
 class QuestionClustering:
     index: Index
@@ -23,7 +39,7 @@ class QuestionClustering:
     model: SentenceTransformer
 
     def __init__(self, threshold: float):
-        LOGGER.info(f"Setting up question cluster with threshold '{threshold}'")
+        logger.info(f"Setting up question cluster with threshold '{threshold}'")
         self.model = SentenceTransformer(
             "quora-distilbert-multilingual",
             backend="onnx",
@@ -42,7 +58,7 @@ class QuestionClustering:
 
         if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
             best_cluster = self.clusters[str(neighbours[0])]
-            LOGGER.info(
+            logger.info(
                 f"Cluster found for '{question}', with similarity {1 - distances[0]}!"
             )
             best_cluster.questions[question] = (
@@ -50,7 +66,7 @@ class QuestionClustering:
             )
             return best_cluster
 
-        LOGGER.info(f"Cluster not found for '{question}'. Creating new cluster...")
+        logger.info(f"Cluster not found for '{question}'. Creating new cluster...")
         idx = str(self.index.add_item(embedding))
         new_cluster = Cluster(
             {question: 1},
