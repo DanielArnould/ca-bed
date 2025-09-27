@@ -50,7 +50,7 @@ class Task(ABC):
 
     @abstractmethod
     async def get_likelihoods(
-        self, current_node: QuestionNode
+        self, question: str, hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         pass
 
