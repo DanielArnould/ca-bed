@@ -12,8 +12,6 @@ from tasks.direct_prompting_task import (
 
 
 class Direct(DirectPromptingTask):
-    self_report: str
-
     def __init__(
         self,
         questioner_session: LLMRequestSession,
@@ -21,9 +19,7 @@ class Direct(DirectPromptingTask):
         task_answer: str,
         max_conversation_depth: int,
         hypothesis_space: list[str],
-        self_report: str,
     ):
-        self.self_report = self_report
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
@@ -33,7 +29,7 @@ class Direct(DirectPromptingTask):
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
+        return f"Twenty Questions (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=}"
 
     @override
     async def query_questioner(
@@ -42,24 +38,22 @@ class Direct(DirectPromptingTask):
         parts = []
 
         # Prologue
-        possible_diseases = "\n".join(f"- {h}" for h in self.hypothesis_space)
+        possible_items = "\n".join(f"- {h}" for h in self.hypothesis_space)
         parts.append(
             dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
-                   
-            The patient is suffering from one of the following possible diseases:      
-            {possible_diseases}
-                   
-            Your goal is to identify the correct disease.
-            You can either ask a question to gather more information, or you can make a prediction.
+            You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
+            The secret object could be one of the following:
+            {possible_items}
+            
+            You can either ask questions that starts with 'Is X' and can only be answered by 'Yes' or 'No', or you can make a prediction of what X is.
             
             If you are confident enough to make a prediction, output:
-            [PREDICTION]: <This should ONLY be the exact name of the disease from the list of possible diseases>
+            [PREDICTION]: <This should ONLY be the exact name of the item from the list of possible items>
 
             Otherwise, if you need more information, output:
-            [QUESTION]: <Your question here>
+            [QUESTION]: <Your yes/no question here>
             """)
-            .format(self_report=self.self_report, possible_diseases=possible_diseases)
+            .format(possible_items=possible_items)
             .strip()
         )
 
@@ -69,7 +63,7 @@ class Direct(DirectPromptingTask):
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
                 dedent("""
-                These are the questions you've asked to the patient so far:
+                These are the questions you've so far:
                 {history}
                 """)
                 .format(history=history_formatted)
@@ -105,8 +99,9 @@ class Direct(DirectPromptingTask):
     async def query_answerer(self, question: str) -> str:
         prompt = (
             dedent("""\
-            You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you questions, and you should answer each one truthfully based on your disease.
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
+            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
+            ONLY ANSWER WITH YES OR NO.
             Let us begin. Here is my question:
             {question}
             """)
