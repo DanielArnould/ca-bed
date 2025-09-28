@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import random
 from datetime import datetime
 from pathlib import Path
 
@@ -21,14 +20,13 @@ logger = logging.getLogger("Main")
 
 async def main(output_dir: Path) -> None:
     # =============== CONFIG ===============
-    questioner_model_key = "gpt_oss_20b"
+    questioner_model_key = "gpt_4o_mini"
     answerer_model_key = "gpt_oss_20b"
     sharpness_constant = 0.4
     min_probability = 0.001
     max_concurrent = 1
     clustering_threshold = 0.97
     dataset = COMMON
-    random.seed(42)
 
     tasks = [
         Bayesian(
@@ -41,7 +39,7 @@ async def main(output_dir: Path) -> None:
             confidence_threshold=0.7,
             hypothesis_space=dataset,
         )
-        for item in random.sample(dataset, 10)
+        for item in dataset
     ]
 
     # =============== EXECUTION ===============
@@ -98,7 +96,8 @@ async def run_tree_based_task(
 
         logger.info(f"[{idx}] Run saved to {output_dir}")
         logger.info(
-            f"[{idx}] Total input tokens: {run_record.total_input_tokens} Total output tokens: {run_record.total_output_tokens}"
+            f"[{idx}] Total input tokens: {task.questioner_session.total_input_tokens + task.answerer_session.total_input_tokens}"
+            f" Total output tokens: {run_record.questioner_session.total_output_tokens + run_record.answerer_session.total_output_tokens}"
         )
 
 

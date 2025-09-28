@@ -2,74 +2,130 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
+from typing import Literal, TypedDict
+from models import LLMRequestSession
 from node import EvidenceNode, QuestionNode
 from question_clustering import Cluster, QuestionClustering
 from voyager import Index
 
 
+class SerialisedQuestionNode(TypedDict):
+    type: Literal["question"]
+    question: str
+    children: list["SerialisedEvidenceNode"]
+
+
+class SerialisedEvidenceNode(TypedDict):
+    type: Literal["evidence"]
+    answer: str
+    belief_state: dict[str, float]
+    marginal_likelihood: float
+    children: list["SerialisedQuestionNode"]
+
+
+def serialise_question_node(node: QuestionNode) -> SerialisedQuestionNode:
+    return {
+        "type": "question",
+        "question": node.question,
+        "children": [serialise_evidence_node(child) for child in node.children],
+    }
+
+
+def serialise_evidence_node(node: EvidenceNode) -> SerialisedEvidenceNode:
+    return {
+        "type": "evidence",
+        "answer": node.answer,
+        "belief_state": node.belief_state,
+        "marginal_likelihood": node.marginal_likelihood,
+        "children": [serialise_question_node(child) for child in node.children],
+    }
+
+
+def deserialise_question_node(
+    node: SerialisedQuestionNode, parent: EvidenceNode
+) -> QuestionNode:
+    deserialised_node = QuestionNode(question=node["question"], parent=parent)
+    deserialised_node.children = [
+        deserialise_evidence_node(child, parent=deserialised_node)
+        for child in node["children"]
+    ]
+    return deserialised_node
+
+
+def deserialise_evidence_node(
+    node: SerialisedEvidenceNode, parent: QuestionNode | None = None
+) -> EvidenceNode:
+    deserialised_node = EvidenceNode(
+        answer=node["answer"],
+        belief_state=node["belief_state"],
+        marginal_likelihood=node["marginal_likelihood"],
+        parent=parent,
+    )
+    deserialised_node.children = [
+        deserialise_question_node(child, parent=deserialised_node)
+        for child in node["children"]
+    ]
+    return deserialised_node
+
+
 @dataclass
 class RunRecord:
     task_info: str
-    true_answer: str
+    questioner_session: LLMRequestSession
+    answerer_session: LLMRequestSession
+    expected_answer: str
     start_time: datetime
     end_time: datetime
-    total_input_tokens: int
-    total_output_tokens: int
     final_path: list[str]
     final_belief_state: dict[str, float]
-    serialised_tree: dict | None
+    serialised_tree: SerialisedEvidenceNode | None
 
 
-def serialise_tree(root: EvidenceNode) -> dict:
-    def _serialise(node: EvidenceNode | QuestionNode) -> dict:
-        match node:
-            case EvidenceNode(answer, belief_state, marginal_likelihood, _, children):
-                return {
-                    "type": "evidence",
-                    "answer": answer,
-                    "belief_state": belief_state,
-                    "marginal_likelihood": marginal_likelihood,
-                    "children": [_serialise(child) for child in children],
-                }
-            case QuestionNode(question, _, children):
-                return {
-                    "type": "question",
-                    "question": question,
-                    "children": [_serialise(child) for child in children],
-                }
+def serialise_run_record(run_record: RunRecord) -> dict:
+    return {
+        "task_info": run_record.task_info,
+        "expected_answer": run_record.expected_answer,
+        "questioner_session": {
+            "model_key": run_record.questioner_session.model_key,
+            "total_input_tokens": run_record.questioner_session.total_input_tokens,
+            "total_output_tokens": run_record.questioner_session.total_output_tokens,
+        },
+        "answerer_session": {
+            "model_key": run_record.answerer_session.model_key,
+            "total_input_tokens": run_record.answerer_session.total_input_tokens,
+            "total_output_tokens": run_record.answerer_session.total_output_tokens,
+        },
+        "start_time": run_record.start_time.isoformat(),
+        "end_time": run_record.end_time.isoformat(),
+        "final_path": run_record.final_path,
+        "final_belief_state": run_record.final_belief_state,
+        "serialised_tree": run_record.serialised_tree,
+    }
 
-    return _serialise(root)
 
-
-def deserialise_tree(serialised_tree: dict) -> EvidenceNode:
-    def _deserialise(
-        data: dict, parent: EvidenceNode | QuestionNode | None = None
-    ) -> EvidenceNode | QuestionNode:
-        match data["type"]:
-            case "evidence":
-                assert parent is None or isinstance(parent, QuestionNode), (
-                    "Invalid parent of evidence node!"
-                )
-                node = EvidenceNode(
-                    answer=data["answer"],
-                    belief_state=data["belief_state"],
-                    marginal_likelihood=data["marginal_likelihood"],
-                    parent=parent,
-                )
-            case "question":
-                assert isinstance(parent, EvidenceNode), (
-                    "Invalid parent of question node!"
-                )
-                node = QuestionNode(question=data["question"], parent=parent)
-            case node_type:
-                raise ValueError(f"Unknown node type: {node_type}")
-
-        node.children = [  # type: ignore
-            _deserialise(child_data, parent=node) for child_data in data["children"]
-        ]
-        return node
-
-    return _deserialise(serialised_tree, parent=None)  # type: ignore
+def deserialise_run_record(
+    run_record: dict,
+    include_tree: bool = False,
+) -> RunRecord:
+    return RunRecord(
+        task_info=run_record["task_info"],
+        questioner_session=LLMRequestSession(
+            model_key=run_record["questioner_session"]["model_key"],
+            total_input_tokens=run_record["questioner_session"]["total_input_tokens"],
+            total_output_tokens=run_record["questioner_session"]["total_output_tokens"],
+        ),
+        answerer_session=LLMRequestSession(
+            model_key=run_record["answerer_session"]["model_key"],
+            total_input_tokens=run_record["answerer_session"]["total_input_tokens"],
+            total_output_tokens=run_record["answerer_session"]["total_output_tokens"],
+        ),
+        expected_answer=run_record["expected_answer"],
+        start_time=datetime.fromisoformat(run_record["start_time"]),
+        end_time=datetime.fromisoformat(run_record["end_time"]),
+        serialised_tree=run_record["serialised_tree"] if include_tree else None,
+        final_path=run_record["final_path"],
+        final_belief_state=run_record["final_belief_state"],
+    )
 
 
 def save_question_clustering(
@@ -110,34 +166,3 @@ def load_question_clustering(json_path: Path, voyager_path: Path) -> QuestionClu
         clustering.index = Index.load(f)
 
     return clustering
-
-
-def serialise_run_record(history: RunRecord) -> dict:
-    return {
-        "task_info": history.task_info,
-        "true_answer": history.true_answer,
-        "start_time": history.start_time.isoformat(),
-        "end_time": history.end_time.isoformat(),
-        "total_input_tokens": history.total_input_tokens,
-        "total_output_tokens": history.total_output_tokens,
-        "final_path": history.final_path,
-        "final_belief_state": history.final_belief_state,
-        "tree": history.serialised_tree,
-    }
-
-
-def deserialise_run_record(
-    history_dict: dict,
-    include_tree: bool = False,
-) -> RunRecord:
-    return RunRecord(
-        task_info=history_dict["task_info"],
-        true_answer=history_dict["true_answer"],
-        start_time=datetime.fromisoformat(history_dict["start_time"]),
-        end_time=datetime.fromisoformat(history_dict["end_time"]),
-        total_input_tokens=history_dict["total_input_tokens"],
-        total_output_tokens=history_dict["total_output_tokens"],
-        serialised_tree=history_dict["tree"] if include_tree else None,
-        final_path=history_dict["final_path"],
-        final_belief_state=history_dict["final_belief_state"],
-    )

@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from functools import partial
 import logging
-from history import RunRecord, serialise_tree
+from history import RunRecord, serialise_evidence_node
 from node import EvidenceNode, QuestionNode, get_conversation_depth
 from question_clustering import QuestionClustering
 from rewards import expected_reward
@@ -48,25 +48,19 @@ async def run_task(
     end_time = datetime.now()
     logger.info(
         f"Completed run in {end_time - start_time}s! "
-        "Final belief: {current_node.belief_state}"
+        f"Final belief: {current_node.belief_state}"
     )
 
     return RunRecord(
         task_info=str(task),
-        true_answer=task.task_answer,
+        questioner_session=task.questioner_session,
+        answerer_session=task.answerer_session,
+        expected_answer=task.task_answer,
         start_time=start_time,
         end_time=end_time,
-        total_input_tokens=(
-            task.questioner_session.total_input_tokens
-            + task.answerer_session.total_input_tokens
-        ),
-        total_output_tokens=(
-            task.questioner_session.total_output_tokens
-            + task.answerer_session.total_output_tokens
-        ),
-        serialised_tree=serialise_tree(root),
         final_path=final_path,
         final_belief_state=current_node.belief_state,
+        serialised_tree=serialise_evidence_node(root),
     )
 
 

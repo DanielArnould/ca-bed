@@ -56,7 +56,7 @@ llm_models: dict[str, dict] = {
     "gpt_4o_mini": {
         "client": _openai_client,
         "model_name": "gpt-4o-mini-2024-07-18",
-        "params": {},
+        "params": {"temperature": 0.0},
     },
     "llama_3_3_70b": {
         "client": _together_client,
