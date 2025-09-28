@@ -57,3 +57,5 @@ class Task(ABC):
     @abstractmethod
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
         pass
+
+    # TODO: Create __str__
