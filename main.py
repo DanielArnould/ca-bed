@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import direct_prompting_method
 from history import (
     save_question_clustering,
     serialise_run_record,
@@ -11,6 +12,7 @@ from history import (
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
+from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.task import Task
 from tasks.twenty_questions.bayesian import Bayesian
 from tasks.twenty_questions.data import COMMON
@@ -89,6 +91,27 @@ async def run_tree_based_task(
             question_clustering_path_json,
             question_clustering_path_voyager,
         )
+
+        run_history_path = output_dir / f"{idx}_run.json"
+        with run_history_path.open("w") as f:
+            json.dump(serialise_run_record(run_record), f)
+
+        logger.info(f"[{idx}] Run saved to {output_dir}")
+        logger.info(
+            f"[{idx}] Total input tokens: {task.questioner_session.total_input_tokens + task.answerer_session.total_input_tokens}"
+            f" Total output tokens: {run_record.questioner_session.total_output_tokens + run_record.answerer_session.total_output_tokens}"
+        )
+
+
+async def run_direct_prompting_task(
+    idx: int,
+    task: DirectPromptingTask,
+    output_dir: Path,
+    semaphore: asyncio.Semaphore,
+) -> None:
+    async with semaphore:
+        run_record = await direct_prompting_method.run_task(task)
+        logger.info(f"[{idx}] Completed run, saving output to {output_dir}")
 
         run_history_path = output_dir / f"{idx}_run.json"
         with run_history_path.open("w") as f:
