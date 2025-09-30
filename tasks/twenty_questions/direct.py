@@ -98,10 +98,10 @@ class Direct(DirectPromptingTask):
     @override
     async def query_answerer(self, question: str) -> str:
         prompt = (
-            dedent("""\
+            dedent("""
             You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
-            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
-            ONLY ANSWER WITH YES OR NO.
+            I will ask up to 20 questions and you should answer each one truthfully based on being X.
+            DO NOT REVEAL/MENTION WHAT X IS UNTIL I ASK "Is X ..."
             Let us begin. Here is my question:
             {question}
             """)
