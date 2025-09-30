@@ -55,10 +55,11 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
                 current_node.children.append(question_node)
                 final_path.append(str(question_node))
 
+                prediction_count += 1
                 updated_belief_state = calculate_posterior(
                     current_node.belief_state, prediction, prediction_count
                 )
-                prediction_count += 1
+
                 # Get answer deterministically by comparing to expected answer
                 evidence_answer = (
                     "Yes"

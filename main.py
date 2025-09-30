@@ -13,35 +13,38 @@ import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
 from tasks.direct_prompting_task import DirectPromptingTask
+from tasks.med_dg.baseline import Baseline
+from tasks.med_dg.bayesian import Bayesian
+from tasks.med_dg.data import MED_DG_SET, load_all_data
+from tasks.med_dg.direct import Direct
 from tasks.task import Task
-from tasks.twenty_questions.bayesian import Bayesian
-from tasks.twenty_questions.data import COMMON
 
 logger = logging.getLogger("Main")
 
 
 async def main(output_dir: Path) -> None:
     # =============== CONFIG ===============
-    questioner_model_key = "gpt_4o_mini"
+    questioner_model_key = "gpt_oss_20b"
     answerer_model_key = "gpt_oss_20b"
     sharpness_constant = 0.4
     min_probability = 0.001
     max_concurrent = 1
     clustering_threshold = 0.97
-    dataset = COMMON
+    dataset = load_all_data()
 
     tasks = [
-        Bayesian(
+        Direct(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
-            task_answer=item,
-            max_question_nodes=2,
-            max_lookahead_depth=3,
-            max_conversation_depth=20,
-            confidence_threshold=0.7,
-            hypothesis_space=dataset,
+            task_answer=item.disease,
+            # max_question_nodes=2,
+            # max_lookahead_depth=3,
+            max_conversation_depth=5,
+            # confidence_threshold=0.7,
+            hypothesis_space=MED_DG_SET,
+            self_report=item.self_report,
         )
-        for item in dataset
+        for item in dataset[:1]
     ]
 
     # =============== EXECUTION ===============
@@ -52,15 +55,16 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            run_tree_based_task(
-                i,
-                task,
-                output_dir,
-                semaphore,
-                sharpness_constant,
-                min_probability,
-                question_clustering,
-            )
+            # run_tree_based_task(
+            #     i,
+            #     task,
+            #     output_dir,
+            #     semaphore,
+            #     sharpness_constant,
+            #     min_probability,
+            #     question_clustering,
+            # )
+            run_direct_prompting_task(i, task, output_dir, semaphore)
             for i, task in enumerate(tasks)
         ]
     )
