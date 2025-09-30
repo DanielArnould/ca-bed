@@ -2,172 +2,162 @@ import asyncio
 from datetime import datetime
 from functools import partial
 import logging
-from history import RunRecord, serialise_tree
-from models import Model, call_llm
+from history import RunRecord, serialise_evidence_node
 from node import EvidenceNode, QuestionNode, get_conversation_depth
 from question_clustering import QuestionClustering
 from rewards import expected_reward
 from tasks.task import Task
 
-LOGGER = logging.getLogger("Method")
+logger = logging.getLogger("Method")
 
 
-class Method:
-    benchmark_model: Model
-    method_model: Model
-    sharpness_constant: float
-    task: Task
-    question_clustering: QuestionClustering
-    root: EvidenceNode
-    total_input_tokens: int
-    total_output_tokens: int
+async def run_task(
+    task: Task,
+    question_clustering: QuestionClustering,
+    sharpness_constant: float,
+    min_probability: float,
+) -> RunRecord:
+    start_time = datetime.now()
+    final_path: list[str] = []
 
-    def __init__(
-        self,
-        benchmark_model: Model,
-        method_model: Model,
-        sharpness_constant: float,
-        task: Task,
-        question_clustering: QuestionClustering,
-    ):
-        self.benchmark_model = benchmark_model
-        self.method_model = method_model
-        self.sharpness_constant = sharpness_constant
-        self.task = task
-        self.question_clustering = question_clustering
-        self.total_input_tokens = self.total_output_tokens = 0
+    # Create root node
+    initial_belief_state = await task.create_initial_belief_state()
+    root = EvidenceNode("ROOT", initial_belief_state, 1.0)
+    logger.info(f"Created root: {str(root)}")
+    current_node = root
+    final_path.append(str(current_node))
 
-    async def run(self) -> RunRecord:
-        start_time = datetime.now()
-        final_path = []
-
-        self.root, input_tokens, output_tokens = await self.task.create_root(
-            self.method_model
+    while not is_terminal(current_node, task):
+        await expand_evidence(
+            current_node, 0, task, question_clustering, min_probability
         )
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
 
-        LOGGER.info(f"Created root: {str(self.root)}")
+        best_question_node = max(
+            current_node.children,
+            key=partial(expected_reward, sharpness_constant=sharpness_constant),
+        )
+        logger.info(f"Selected question node: {str(best_question_node)}")
+        final_path.append(str(best_question_node))
 
-        current_node = self.root
+        # Get question answer and move ahead
+        selected_evidence_node = await task.get_answer(best_question_node)
+        logger.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
+        current_node = selected_evidence_node
         final_path.append(str(current_node))
 
-        while not self.is_terminal(current_node):
-            await self.expand_evidence(current_node, 0)
-            best_question_node = max(
-                current_node.children,
-                key=partial(
-                    expected_reward, sharpness_constant=self.sharpness_constant
-                ),
+    end_time = datetime.now()
+    logger.info(
+        f"Completed run in {end_time - start_time}s! "
+        f"Final belief: {current_node.belief_state}"
+    )
+
+    return RunRecord(
+        task_info=str(task),
+        questioner_session=task.questioner_session,
+        answerer_session=task.answerer_session,
+        expected_answer=task.task_answer,
+        start_time=start_time,
+        end_time=end_time,
+        final_path=final_path,
+        final_belief_state=current_node.belief_state,
+        serialised_tree=serialise_evidence_node(root),
+    )
+
+
+async def expand_evidence(
+    current_node: EvidenceNode,
+    current_depth: int,
+    task: Task,
+    question_clustering: QuestionClustering,
+    min_probability: float,
+) -> None:
+    if is_terminal(current_node, task) or current_depth >= task.max_lookahead_depth:
+        return
+
+    if not current_node.children:
+        new_questions = await task.create_questions(current_node)
+        new_question_nodes = [QuestionNode(q, current_node) for q in new_questions]
+        current_node.children.extend(new_question_nodes)
+
+    await asyncio.gather(
+        *[
+            expand_questions(
+                child, current_depth, task, question_clustering, min_probability
             )
-            LOGGER.info(f"Selected question node: {str(best_question_node)}")
-            final_path.append(str(best_question_node))
+            for child in current_node.children
+        ]
+    )
 
-            selection_prompt = self.task.get_answer_selection_prompt(best_question_node)
-            LOGGER.info("Posing question to Benchmark LLM...")
-            selection_output, input_tokens, output_tokens = await call_llm(
-                selection_prompt, self.benchmark_model
+
+async def expand_questions(
+    current_node: QuestionNode,
+    current_depth: int,
+    task: Task,
+    question_clustering: QuestionClustering,
+    min_probability: float,
+) -> None:
+    if not current_node.children:
+        cluster = question_clustering.get_cluster(current_node.question)
+
+        async with cluster.lock:
+            missing_hypotheses = set(current_node.parent.belief_state.keys()) - set(
+                cluster.get_hypotheses()
             )
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            selected_evidence_node = self.task.parse_answer_selection_output(
-                selection_output, best_question_node
-            )
-            LOGGER.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
-            current_node = selected_evidence_node
 
-            final_path.append(str(current_node))
-
-        end_time = datetime.now()
-        LOGGER.info(
-            f"Completed run in {end_time - start_time}s! Final belief: {current_node.belief_state}"
-        )
-
-        return RunRecord(
-            task_info=str(self.task),
-            true_answer=self.task.task_answer,
-            start_time=start_time,
-            end_time=end_time,
-            total_input_tokens=self.total_input_tokens,
-            total_output_tokens=self.total_output_tokens,
-            serialised_tree=serialise_tree(self.root),
-            final_path=final_path,
-            final_belief_state=current_node.belief_state,
-        )
-
-    async def expand_evidence(self, curr: EvidenceNode, current_depth: int) -> None:
-        if self.is_terminal(curr) or current_depth >= self.task.max_lookahead_depth:
-            return
-
-        if not curr.children:
-            prompt = self.task.get_question_generation_prompt(curr)
-            output, input_tokens, output_tokens = await call_llm(
-                prompt, self.method_model
-            )
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            new_questions = self.task.parse_question_generation_output(output)
-            new_question_nodes = [QuestionNode(q, curr) for q in new_questions]
-            curr.children.extend(new_question_nodes)
-
-        await asyncio.gather(
-            *[self.expand_questions(child, current_depth) for child in curr.children]
-        )
-
-    async def expand_questions(self, curr: QuestionNode, current_depth: int) -> None:
-        if not curr.children:
-            cluster = self.question_clustering.get_cluster(curr.question)
-
-            async with cluster.lock:
-                if cluster.likelihoods is None:
-                    output, input_tokens, output_tokens = await call_llm(
-                        self.task.get_likelihood_elicitation_prompt(curr.question),
-                        self.method_model,
-                    )
-                    self.total_input_tokens += input_tokens
-                    self.total_output_tokens += output_tokens
-                    cluster.likelihoods = self.task.parse_likelihood_elicitation_output(
-                        output
-                    )
-
-            for answer, likelihoods in cluster.likelihoods.items():
-                posterior, marginal = self.calculate_posterior(
-                    curr.parent.belief_state, likelihoods
+            if missing_hypotheses:
+                new_likelihoods = await task.get_likelihoods(
+                    current_node.question, list(missing_hypotheses)
                 )
-                evidence_node = EvidenceNode(
-                    answer=answer,
-                    belief_state=posterior,
-                    marginal_likelihood=marginal,
-                    parent=curr,
-                )
-                curr.children.append(evidence_node)
+                cluster.likelihoods.update(new_likelihoods)
 
-        await asyncio.gather(
-            *[self.expand_evidence(child, current_depth + 1) for child in curr.children]
-        )
+        for answer in cluster.get_answers():
+            likelihoods = cluster.get_likelihoods_for_answer(answer)
+            posterior, marginal = calculate_posterior(
+                current_node.parent.belief_state, likelihoods, min_probability
+            )
+            evidence_node = EvidenceNode(
+                answer=answer,
+                belief_state=posterior,
+                marginal_likelihood=marginal,
+                parent=current_node,
+            )
+            current_node.children.append(evidence_node)
 
-    def calculate_posterior(
-        self, prior: dict[str, float], likelihoods: dict[str, float]
-    ) -> tuple[dict[str, float], float]:
-        # Calculate unnormalised posterior: P(hypothesis) * P(evidence|hypothesis)
-        unnormalised_posterior: dict[str, float] = {}
-        for hypo, prior_belief in prior.items():
-            likelihood = likelihoods.get(hypo, 1.0)
-            if hypo not in likelihoods:
-                LOGGER.warning(f"{hypo} not found in likelihoods! Defaulting to 1...")
-            unnormalised_posterior[hypo] = max(prior_belief * likelihood, 0)
+    await asyncio.gather(
+        *[
+            expand_evidence(
+                child, current_depth + 1, task, question_clustering, min_probability
+            )
+            for child in current_node.children
+        ]
+    )
 
-        # Calculate marginal (normalisation constant)
-        marginal = sum(unnormalised_posterior.values())
-        posterior = {
-            hypo: (prob / max(marginal, 1e-10))
-            for hypo, prob in unnormalised_posterior.items()
-        }
 
-        return posterior, marginal
+def calculate_posterior(
+    prior: dict[str, float], likelihoods: dict[str, float], min_probability: float
+) -> tuple[dict[str, float], float]:
+    all_posteriors = {h: p * likelihoods.get(h, 1.0) for h, p in prior.items()}
 
-    def is_terminal(self, node: EvidenceNode) -> bool:
-        return get_conversation_depth(node) >= self.task.max_conversation_depth or any(
-            prob >= self.task.confidence_threshold
-            for prob in node.belief_state.values()
-        )
+    # Warn for missing likelihoods
+    for h in prior:
+        if h not in likelihoods:
+            logger.warning(f"{h} not found in likelihoods! Defaulting to 1...")
+
+    unnormalised = {h: p for h, p in all_posteriors.items() if p >= min_probability}
+
+    # Ensure at least one hypothesis. This is just for sanity so other functions
+    # don't break. The marginal will be close to zero, so rewards shouldn't be
+    # affected.
+    if not unnormalised:
+        max_h = max(all_posteriors, key=all_posteriors.__getitem__)
+        unnormalised[max_h] = all_posteriors[max_h]
+
+    marginal = sum(unnormalised.values())
+    normalised = {h: p / marginal for h, p in unnormalised.items()}
+    return normalised, marginal
+
+
+def is_terminal(node: EvidenceNode, task: Task) -> bool:
+    return get_conversation_depth(node) >= task.max_conversation_depth or any(
+        prob >= task.confidence_threshold for prob in node.belief_state.values()
+    )

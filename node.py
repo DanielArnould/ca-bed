@@ -33,6 +33,18 @@ def get_conversation_depth(node: EvidenceNode) -> int:
     return 1 + get_conversation_depth(node.parent.parent)
 
 
+def get_conversation_history(node: EvidenceNode) -> list[tuple[str, str]]:
+    history = []
+    curr = node
+    while curr.parent:
+        question = curr.parent.question
+        answer = curr.answer
+        history.append((question, answer))
+        curr = curr.parent.parent
+
+    return history[::-1]
+
+
 def stringify(root: EvidenceNode) -> str:
     lines = []
 
@@ -60,45 +72,3 @@ def stringify(root: EvidenceNode) -> str:
         _build_string(child, "", i == len(root.children) - 1)
 
     return "\n".join(lines)
-
-
-if __name__ == "__main__":
-    root = EvidenceNode(
-        "ROOT",
-        belief_state=dict([("A", 0.25), ("B", 0.25), ("C", 0.25), ("D", 0.25)]),
-        marginal_likelihood=1.0,
-    )
-
-    question1 = QuestionNode("Is it greater than or equal to B?", parent=root)
-    question1_affirmative = EvidenceNode(
-        "Yes",
-        belief_state=dict([("A", 0.5), ("B", 0.5)]),
-        marginal_likelihood=0.5,
-        parent=question1,
-    )
-    question1_negative = EvidenceNode(
-        "No",
-        belief_state=dict([("C", 0.5), ("D", 0.5)]),
-        marginal_likelihood=0.5,
-        parent=question1,
-    )
-    question1.children.extend([question1_affirmative, question1_negative])
-    root.children.append(question1)
-
-    question2 = QuestionNode("Is it an even letter?", parent=root)
-    question2_affirmative = EvidenceNode(
-        "Yes",
-        belief_state=dict([("A", 0.5), ("C", 0.5)]),
-        marginal_likelihood=0.5,
-        parent=question2,
-    )
-    question2_negative = EvidenceNode(
-        "No",
-        belief_state=dict([("B", 0.5), ("D", 0.5)]),
-        marginal_likelihood=0.5,
-        parent=question2,
-    )
-    question2.children.extend([question2_affirmative, question2_negative])
-    root.children.append(question2)
-
-    print(stringify(root))

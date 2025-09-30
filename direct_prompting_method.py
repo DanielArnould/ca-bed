@@ -1,15 +1,18 @@
 from datetime import datetime
 import logging
-from history import RunRecord, serialise_tree
-from models import Model, call_llm
+from history import RunRecord, serialise_evidence_node
 from node import EvidenceNode, QuestionNode, get_conversation_depth
-from tasks.direct_prompting_task import DirectPromptingTask, NaiveQuestionerResponse
+from tasks.direct_prompting_task import (
+    DirectPromptingTask,
+    Prediction,
+    Question,
+)
 
 
-LOGGER = logging.getLogger("Direct Prompting Method")
+logger = logging.getLogger("Direct Prompting Method")
 
 
-class DirectPromptingMethod:
+async def run_task(task: DirectPromptingTask) -> RunRecord:
     """
     The direct prompting method fits into the same evaluation framework as the
     normal method. We achieve this as follows:
@@ -26,144 +29,104 @@ class DirectPromptingMethod:
     5. We terminate whenever the task answer has a belief greater than 0
        (has been predicted at least once) or we reach max conversation depth
     """
+    start_time = datetime.now()
+    final_path: list[str] = []
 
-    benchmark_model: Model
-    method_model: Model
-    task: DirectPromptingTask
-    root: EvidenceNode
-    current_node: EvidenceNode
-    total_input_tokens: int
-    total_output_tokens: int
-    prediction_count: int
+    # Create root node
+    root = EvidenceNode(
+        answer="ROOT",
+        belief_state={},
+        marginal_likelihood=1.0,
+    )
+    prediction_count = 0
+    current_node = root
+    final_path.append(str(current_node))
 
-    def __init__(
-        self,
-        benchmark_model: Model,
-        method_model: Model,
-        task: DirectPromptingTask,
-    ):
-        self.benchmark_model = benchmark_model
-        self.method_model = method_model
-        self.task = task
-        self.root = EvidenceNode(
-            answer="ROOT",
-            belief_state={},
+    while not is_terminal(current_node, task):
+        # Get response from questioner model
+        response = await task.query_questioner(current_node)
+
+        match response:
+            case Prediction(prediction):
+                # Create question node for prediction
+                question_node = QuestionNode(
+                    f"Is it {prediction}?", parent=current_node
+                )
+                current_node.children.append(question_node)
+                final_path.append(str(question_node))
+
+                prediction_count += 1
+                updated_belief_state = calculate_posterior(
+                    current_node.belief_state, prediction, prediction_count
+                )
+
+                # Get answer deterministically by comparing to expected answer
+                evidence_answer = (
+                    "Yes"
+                    if prediction.strip().lower() == task.task_answer.strip().lower()
+                    else "No"
+                )
+
+            case Question(question):
+                # Create question node for regular question
+                question_node = QuestionNode(question, parent=current_node)
+                current_node.children.append(question_node)
+                final_path.append(str(question_node))
+
+                # Get answer from benchmark model
+                evidence_answer = await task.query_answerer(question)
+
+                # Belief state unchanged for regular questions
+                updated_belief_state = current_node.belief_state.copy()
+
+        evidence_node = EvidenceNode(
+            answer=evidence_answer,
+            belief_state=updated_belief_state,
             marginal_likelihood=1.0,
+            parent=question_node,
         )
-        self.current_node = self.root
-        self.total_input_tokens = self.total_output_tokens = 0
-        self.prediction_count = 0
+        question_node.children.append(evidence_node)
+        current_node = evidence_node
+        final_path.append(str(evidence_node))
 
-    async def run(self) -> RunRecord:
-        start_time = datetime.now()
-        final_path = [str(self.current_node)]
+    end_time = datetime.now()
+    logger.info(f"Completed run in {end_time - start_time}s!")
 
-        while not self.is_terminal(self.current_node):
-            # Get response from questioner model
-            questioner_output, input_tokens, output_tokens = await call_llm(
-                self.task.get_questioner_prompt(self.current_node),
-                self.method_model,
-            )
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-
-            response_type, content = self.task.parse_questioner_output(
-                questioner_output
-            )
-
-            match response_type:
-                case NaiveQuestionerResponse.PREDICTION:
-                    prediction = content
-                    # Create question node for prediction
-                    question_node = QuestionNode(
-                        f"Is it {prediction}?", parent=self.current_node
-                    )
-                    self.current_node.children.append(question_node)
-                    final_path.append(str(question_node))
-
-                    updated_belief_state = self.calculate_posterior(
-                        self.current_node.belief_state, prediction
-                    )
-                    # Get answer deterministically by comparing to expected answer
-                    evidence_answer = (
-                        "Yes"
-                        if prediction.strip().lower()
-                        == self.task.task_answer.strip().lower()
-                        else "No"
-                    )
-
-                case NaiveQuestionerResponse.QUESTION:
-                    question = content
-                    # Create question node for regular question
-                    question_node = QuestionNode(question, parent=self.current_node)
-                    self.current_node.children.append(question_node)
-                    final_path.append(str(question_node))
-
-                    # Get answer from benchmark model
-                    answerer_output, input_tokens, output_tokens = await call_llm(
-                        self.task.get_answerer_prompt(question),
-                        self.benchmark_model,
-                    )
-                    self.total_input_tokens += input_tokens
-                    self.total_output_tokens += output_tokens
-
-                    # Belief state unchanged for regular questions
-                    updated_belief_state = self.current_node.belief_state.copy()
-                    evidence_answer = answerer_output
-
-            evidence_node = EvidenceNode(
-                answer=evidence_answer,
-                belief_state=updated_belief_state,
-                marginal_likelihood=1.0,
-                parent=question_node,
-            )
-            question_node.children.append(evidence_node)
-            self.current_node = evidence_node
-            final_path.append(str(evidence_node))
-
-        end_time = datetime.now()
-        LOGGER.info(f"Completed run in {end_time - start_time}s!")
-
-        return RunRecord(
-            task_info=str(self.task),
-            true_answer=self.task.task_answer,
-            start_time=start_time,
-            end_time=end_time,
-            total_input_tokens=self.total_input_tokens,
-            total_output_tokens=self.total_output_tokens,
-            serialised_tree=serialise_tree(self.root),
-            final_path=final_path,
-            final_belief_state=self.current_node.belief_state,
-        )
-
-    def calculate_posterior(
-        self, prior_belief_state: dict[str, float], prediction: str
-    ) -> dict[str, float]:
-        """Update belief state by adding weighted prediction and normalising"""
-        self.prediction_count += 1
-
-        # Earlier predictions get higher weight
-        prediction_weight = 1.0 / self.prediction_count
-
-        posterior = prior_belief_state.copy()
-        posterior[prediction] = posterior.get(prediction, 0) + prediction_weight
-
-        # Normalise to ensure probabilities sum to 1
-        total_probability = sum(posterior.values())
-        assert total_probability > 0
-        posterior = {
-            hypothesis: probability / total_probability
-            for hypothesis, probability in posterior.items()
-        }
-        return posterior
-
-    def is_terminal(self, node: EvidenceNode) -> bool:
-        return (
-            get_conversation_depth(node) >= self.task.max_conversation_depth
-            or self.task.task_answer in node.belief_state
-        )
+    return RunRecord(
+        task_info=str(task),
+        questioner_session=task.questioner_session,
+        answerer_session=task.answerer_session,
+        expected_answer=task.task_answer,
+        start_time=start_time,
+        end_time=end_time,
+        final_path=final_path,
+        final_belief_state=current_node.belief_state,
+        serialised_tree=serialise_evidence_node(root),
+    )
 
 
-def get_uniform_belief_state(hypothesis_space: list[str]) -> dict[str, float]:
-    uniform_probability = 1.0 / len(hypothesis_space)
-    return {hypothesis: uniform_probability for hypothesis in hypothesis_space}
+def calculate_posterior(
+    prior_belief_state: dict[str, float], prediction: str, prediction_count: int
+) -> dict[str, float]:
+    """Update belief state by adding weighted prediction and normalising"""
+    # Earlier predictions get higher weight
+    prediction_weight = 1.0 / prediction_count
+
+    posterior = prior_belief_state.copy()
+    posterior[prediction] = posterior.get(prediction, 0) + prediction_weight
+
+    # Normalise to ensure probabilities sum to 1
+    total_probability = sum(posterior.values())
+    assert total_probability > 0
+    posterior = {
+        hypothesis: probability / total_probability
+        for hypothesis, probability in posterior.items()
+    }
+    return posterior
+
+
+def is_terminal(node: EvidenceNode, task: DirectPromptingTask) -> bool:
+    return (
+        get_conversation_depth(node) >= task.max_conversation_depth
+        or task.task_answer in node.belief_state
+    )

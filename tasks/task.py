@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from models import Model
+from models import LLMRequestSession
 from node import EvidenceNode, QuestionNode
 
 
@@ -8,6 +8,8 @@ class Task(ABC):
     Prompts and parsers are separated so that LLM calls remain independent of
     tasks and can be robustly tracked for history."""
 
+    questioner_session: LLMRequestSession
+    answerer_session: LLMRequestSession
     task_answer: str
     max_question_nodes: int  # Max number of questions to generate at each step
     max_evidence_nodes: int  # Max possible number of answers to each question
@@ -18,6 +20,8 @@ class Task(ABC):
 
     def __init__(
         self,
+        questioner_session: LLMRequestSession,
+        answerer_session: LLMRequestSession,
         task_answer: str,
         max_question_nodes: int,
         max_evidence_nodes: int,
@@ -26,6 +30,8 @@ class Task(ABC):
         confidence_threshold: float,
         hypothesis_space: list[str],
     ):
+        self.questioner_session = questioner_session
+        self.answerer_session = answerer_session
         self.task_answer = task_answer
         self.max_question_nodes = max_question_nodes
         self.max_evidence_nodes = max_evidence_nodes
@@ -35,50 +41,21 @@ class Task(ABC):
         self.hypothesis_space = hypothesis_space
 
     @abstractmethod
-    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
-        # Returns (root, input_tokens, output_tokens)
+    async def create_initial_belief_state(self) -> dict[str, float]:
         pass
 
     @abstractmethod
-    def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
-        """
-        From the current node, create a prompt that asks for new questions
-        """
+    async def create_questions(self, current_node: EvidenceNode) -> list[str]:
         pass
 
     @abstractmethod
-    def parse_question_generation_output(self, output: str) -> list[str]:
-        """Parse questions into question and possible answers"""
-        pass
-
-    @abstractmethod
-    def get_likelihood_elicitation_prompt(self, question: str) -> str:
-        """
-        Given a question, create a prompt that asks for the likelihoods for every hypothesis for every answer
-        """
-        pass
-
-    @abstractmethod
-    def parse_likelihood_elicitation_output(
-        self, output: str
+    async def get_likelihoods(
+        self, question: str, hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
-        """
-        For each answer of the question, return a dict mapping each hypothesis to the likelihood of the answer given the hypothesis.
-        """
         pass
 
     @abstractmethod
-    def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
+    async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
         pass
 
-    def parse_answer_selection_output(
-        self, output: str, question_node: QuestionNode
-    ) -> EvidenceNode:
-        llm_answer = output.strip().lower()
-        for child in question_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        raise RuntimeError(
-            f"No matching answer selected for '{question_node.question}'. Possible answers: {list(child.answer for child in question_node.children)}, Given answer: {llm_answer}"
-        )
+    # TODO: Create __str__
