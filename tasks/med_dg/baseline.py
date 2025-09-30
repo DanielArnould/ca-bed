@@ -19,7 +19,6 @@ class Baseline(Task):
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
-        confidence_threshold: float,
         hypothesis_space: list[str],
         self_report: str,
     ):
@@ -190,10 +189,13 @@ class Baseline(Task):
         yes_set = set([s.strip() for s in m_yes.group(1).split(",")] if m_yes else [])
         no_set = set([s.strip() for s in m_no.group(1).split(",")] if m_no else [])
         hs = yes_set.union(no_set)
-        likelihoods_yes = {h: (1 - (1e-10) if h in yes_set else 1e-10) for h in hs}
-        likelihoods_no = {h: (1 - (1e-10) if h in no_set else 1e-10) for h in hs}
 
-        return {"Yes": likelihoods_yes, "No": likelihoods_no}
+        return {
+            h: {"Yes": 1 - (1e-10), "No": 1e-10}
+            if h in yes_set
+            else {"Yes": 1e-10, "No": 1 - (1e-10)}
+            for h in hs
+        }
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
