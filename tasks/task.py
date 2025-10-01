@@ -45,12 +45,14 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    async def create_questions(self, current_node: EvidenceNode) -> list[str]:
+    async def create_questions(
+        self, current_node: EvidenceNode
+    ) -> dict[str, list[str]]:
         pass
 
     @abstractmethod
     async def get_likelihoods(
-        self, question: str, hypotheses: list[str]
+        self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         pass
 

@@ -76,7 +76,10 @@ async def expand_evidence(
 
     if not current_node.children:
         new_questions = await task.create_questions(current_node)
-        new_question_nodes = [QuestionNode(q, current_node) for q in new_questions]
+        new_question_nodes = [
+            QuestionNode(q, answers, current_node)
+            for q, answers in new_questions.items()
+        ]
         current_node.children.extend(new_question_nodes)
 
     await asyncio.gather(
@@ -100,17 +103,22 @@ async def expand_questions(
         cluster = question_clustering.get_cluster(current_node.question)
 
         async with cluster.lock:
+            if answers := cluster.get_answers():
+                current_node.possible_answers = answers
+            else:
+                answers = current_node.possible_answers
+
             missing_hypotheses = set(current_node.parent.belief_state.keys()) - set(
                 cluster.get_hypotheses()
             )
 
             if missing_hypotheses:
                 new_likelihoods = await task.get_likelihoods(
-                    current_node.question, list(missing_hypotheses)
+                    current_node.question, answers, list(missing_hypotheses)
                 )
                 cluster.likelihoods.update(new_likelihoods)
 
-        for answer in cluster.get_answers():
+        for answer in answers:
             likelihoods = cluster.get_likelihoods_for_answer(answer)
             posterior, marginal = calculate_posterior(
                 current_node.parent.belief_state, likelihoods, min_probability
