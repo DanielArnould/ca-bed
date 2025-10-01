@@ -1,4 +1,3 @@
-import json
 import re
 from textwrap import dedent
 from typing import override
@@ -43,29 +42,25 @@ class BayesianWithMultibranching(Task):
     async def create_initial_belief_state(self) -> dict[str, float]:
         prompt = (
             dedent("""\
-            You are an expert Doctor, you are given this self-report:
+            You are an expert doctor. You are given the following patient self-report:
             {self_report}
-            
-            Below is the set of possible conditions the patient may have:
-            {hypothesis_space}
-            
-            Given your knowledge in this area and the given self-report, please assign a prior belief to each 
-            item in the hypothesis set provided above, nothing else. 
-            
-            For example, if our hypothesis space is [A,B,C,D], and C and A are more relevant given the self-report, you 
-            might assign probabilities like below: 
-            A: 0.35, B: 0.02, C: 0.55, D: 0.08
-            
-            Note the probabilities are just conjectures, you should generate reasonable probabilities for each option. 
-            Also note that the sum of these prior probabilities is 1. Please give a probability for each hypothesis even 
-            if they are extremely small.
-            
-            Please strictly return your response in the format below:
-            {{
-                "<Hypothesis 1 full name>": <probability>, 
-                "<Hypothesis 2 full name>": <probability>, 
-                ....
-            }}    
+
+            ### Task
+            - Assign a prior probability to each condition based on the self-report and your medical knowledge.
+            - Every condition in {hypothesis_space} must receive a probability, even if very small.
+            - Probabilities must sum to 1.0 (±0.01 tolerance).
+            - Express each probability as a decimal rounded to two places (e.g., 0.35).
+            - Return only the formatted response; no explanations or commentary.
+
+            ### Response Format
+            One line per condition:
+            <number>. <Condition Name>|<probability>
+
+            ### Example
+            1. Influenza|0.35  
+            2. Common Cold|0.25  
+            3. Pneumonia|0.30  
+            4. Allergies|0.10   
             """)
             .format(
                 self_report=self.self_report,
@@ -75,15 +70,24 @@ class BayesianWithMultibranching(Task):
         )
 
         output = await query_llm(prompt, self.questioner_session)
-        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
-        probs: dict = json.loads(cleaned_output)
-        adjusted_prior = {
-            h: (max(min(p, 1 - (1e-10)), 1e-10)) for h, p in probs.items()
-        }
-        total = sum(adjusted_prior.values())
-        adjusted_prior = {h: v / total for h, v in adjusted_prior.items() if v >= 0.001}
 
-        return adjusted_prior
+        # Parse LLM
+        matches: list[tuple[str, str]] = re.findall(
+            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
+        )
+
+        raw_priors = {
+            disease: max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
+            for disease, prob in matches
+        }
+
+        priors = {
+            disease: prob / sum(raw_priors.values())
+            for disease, prob in raw_priors.items()
+        }
+
+        assert len(priors) > 0, "No priors parsed!"
+        return priors
 
     @override
     async def create_questions(
