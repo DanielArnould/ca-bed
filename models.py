@@ -45,6 +45,7 @@ class Model(Enum):
     DEEPSEEK_CHAT = ("deepseek", "deepseek-chat", {})
     DEEPSEEK_CHAT_TOGETHER_AI = ("together", "deepseek-ai/DeepSeek-V3.1", {})
     GPT_4O_MINI = ("openai", "gpt-4o-mini-2024-07-18", {})
+    GPT_5 = ("openai", "gpt-5", {})
     LLAMA_3_3_70B = ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo", {})
     LLAMA_3_2_3B = ("together", "meta-llama/Llama-3.2-3B-Instruct-Turbo", {})
     GEMMA_3N_4B_TOGETHER_AI = ("together", "google/gemma-3n-E4B-it", {})
