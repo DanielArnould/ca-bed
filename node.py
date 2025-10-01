@@ -10,20 +10,18 @@ class EvidenceNode:
     children: list["QuestionNode"] = field(default_factory=list)
 
     def __str__(self) -> str:
-        formatted_belief_state = ", ".join(
-            [f"{hypothesis}: {prob}" for hypothesis, prob in self.belief_state.items()]
-        )
-        return f"Answer: {self.answer} | Marginal Likelihood: {self.marginal_likelihood} | Belief State: [{formatted_belief_state}]"
+        return f"Answer: {self.answer} | Marginal Likelihood: {self.marginal_likelihood} | Belief State: {self.belief_state}"
 
 
 @dataclass
 class QuestionNode:
     question: str
+    possible_answers: list[str]
     parent: EvidenceNode
     children: list[EvidenceNode] = field(default_factory=list)
 
     def __str__(self) -> str:
-        return f"Question: {self.question}"
+        return f"Question: {self.question} Possible Answers: {self.possible_answers}"
 
 
 def get_conversation_depth(node: EvidenceNode) -> int:
@@ -60,7 +58,7 @@ def stringify(root: EvidenceNode) -> str:
                 for i, child in enumerate(children):
                     new_prefix = prefix + ("    " if is_last else "│   ")
                     _build_string(child, new_prefix, i == len(children) - 1)
-            case QuestionNode(_, _, children) as node:
+            case QuestionNode(_, _, _, children) as node:
                 lines.append(f"{prefix}{connector}{str(node)}")
 
                 for i, child in enumerate(children):
@@ -72,3 +70,47 @@ def stringify(root: EvidenceNode) -> str:
         _build_string(child, "", i == len(root.children) - 1)
 
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    root = EvidenceNode(
+        "ROOT",
+        belief_state=dict([("A", 0.25), ("B", 0.25), ("C", 0.25), ("D", 0.25)]),
+        marginal_likelihood=1.0,
+    )
+
+    question1 = QuestionNode(
+        "Is it greater than or equal to B?", ["Yes", "No"], parent=root
+    )
+    question1_affirmative = EvidenceNode(
+        "Yes",
+        belief_state=dict([("A", 0.5), ("B", 0.5)]),
+        marginal_likelihood=0.5,
+        parent=question1,
+    )
+    question1_negative = EvidenceNode(
+        "No",
+        belief_state=dict([("C", 0.5), ("D", 0.5)]),
+        marginal_likelihood=0.5,
+        parent=question1,
+    )
+    question1.children.extend([question1_affirmative, question1_negative])
+    root.children.append(question1)
+
+    question2 = QuestionNode("Is it an even letter?", ["Yes", "No"], parent=root)
+    question2_affirmative = EvidenceNode(
+        "Yes",
+        belief_state=dict([("A", 0.5), ("C", 0.5)]),
+        marginal_likelihood=0.5,
+        parent=question2,
+    )
+    question2_negative = EvidenceNode(
+        "No",
+        belief_state=dict([("B", 0.5), ("D", 0.5)]),
+        marginal_likelihood=0.5,
+        parent=question2,
+    )
+    question2.children.extend([question2_affirmative, question2_negative])
+    root.children.append(question2)
+
+    print(stringify(root))
