@@ -86,7 +86,9 @@ class Bayesian(Task):
         return adjusted_prior
 
     @override
-    async def create_questions(self, current_node: EvidenceNode) -> list[str]:
+    async def create_questions(
+        self, current_node: EvidenceNode
+    ) -> dict[str, list[str]]:
         parts = []
 
         # Prologue
@@ -150,13 +152,15 @@ class Bayesian(Task):
         question_texts: list[str] = re.findall(
             r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
         )
-        questions = [question_text.strip() for question_text in question_texts]
+        questions = {
+            question_text.strip(): ["Yes", "No"] for question_text in question_texts
+        }
         assert len(questions) > 0, "No questions generated!"
         return questions
 
     @override
     async def get_likelihoods(
-        self, question: str, hypotheses: list[str]
+        self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
         hypotheses_formatted = "\n".join(f"- {h}" for h in hypotheses)
@@ -185,7 +189,6 @@ class Bayesian(Task):
             }}
             """)
             .format(
-                self_report=self.self_report,
                 hypothesis_space=hypotheses_formatted,
                 candidate_question=question,
             )
