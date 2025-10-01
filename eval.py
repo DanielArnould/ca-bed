@@ -135,7 +135,7 @@ if __name__ == "__main__":
     for dir_path in paths:
         run_evals: list[RunEval] = []
         for path in tqdm(dir_path.rglob("*run.json"), desc=f"Loading {dir_path.name}"):
-            with path.open("r") as f:
+            with path.open("r", encoding="utf-8") as f:
                 run_record = deserialise_run_record(json.load(f))
             run_evals.append(get_run_eval(run_record))
 

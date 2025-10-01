@@ -12,6 +12,7 @@ from voyager import Index
 class SerialisedQuestionNode(TypedDict):
     type: Literal["question"]
     question: str
+    possible_answers: list[str]
     children: list["SerialisedEvidenceNode"]
 
 
@@ -27,6 +28,7 @@ def serialise_question_node(node: QuestionNode) -> SerialisedQuestionNode:
     return {
         "type": "question",
         "question": node.question,
+        "possible_answers": node.possible_answers,
         "children": [serialise_evidence_node(child) for child in node.children],
     }
 
@@ -44,7 +46,11 @@ def serialise_evidence_node(node: EvidenceNode) -> SerialisedEvidenceNode:
 def deserialise_question_node(
     node: SerialisedQuestionNode, parent: EvidenceNode
 ) -> QuestionNode:
-    deserialised_node = QuestionNode(question=node["question"], parent=parent)
+    deserialised_node = QuestionNode(
+        question=node["question"],
+        possible_answers=node["possible_answers"],
+        parent=parent,
+    )
     deserialised_node.children = [
         deserialise_evidence_node(child, parent=deserialised_node)
         for child in node["children"]
@@ -141,7 +147,7 @@ def save_question_clustering(
 
     json_cluster = {"clusters": serialised_clusters, "threshold": clustering.threshold}
 
-    with json_path.open("w") as f:
+    with json_path.open("w", encoding="utf-8") as f:
         json.dump(json_cluster, f)
 
     clustering.index.save(str(voyager_path))
@@ -150,7 +156,7 @@ def save_question_clustering(
 def load_question_clustering(json_path: Path, voyager_path: Path) -> QuestionClustering:
     clustering = QuestionClustering(threshold=-1)
 
-    with json_path.open("r") as f:
+    with json_path.open("r", encoding="utf-8") as f:
         qc_dict = json.load(f)
 
     clustering.threshold = qc_dict["threshold"]
