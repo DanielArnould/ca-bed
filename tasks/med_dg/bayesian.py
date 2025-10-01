@@ -1,4 +1,3 @@
-import json
 import re
 from textwrap import dedent
 from typing import override
@@ -43,29 +42,25 @@ class Bayesian(Task):
     async def create_initial_belief_state(self) -> dict[str, float]:
         prompt = (
             dedent("""\
-            You are an expert Doctor, you are given this self-report:
+            You are an expert doctor. You are given the following patient self-report:
             {self_report}
-            
-            Below is the set of possible conditions the patient may have:
-            {hypothesis_space}
-            
-            Given your knowledge in this area and the given self-report, please assign a prior belief to each 
-            item in the hypothesis set provided above, nothing else. 
-            
-            For example, if our hypothesis space is [A,B,C,D], and C and A are more relevant given the self-report, you 
-            might assign probabilities like below: 
-            A: 0.35, B: 0.02, C: 0.55, D: 0.08
-            
-            Note the probabilities are just conjectures, you should generate reasonable probabilities for each option. 
-            Also note that the sum of these prior probabilities is 1. Please give a probability for each hypothesis even 
-            if they are extremely small.
-            
-            Please strictly return your response in the format below:
-            {{
-                "<Hypothesis 1 full name>": <probability>, 
-                "<Hypothesis 2 full name>": <probability>, 
-                ....
-            }}    
+
+            ### Task
+            - Assign a prior probability to each condition based on the self-report and your medical knowledge.
+            - Every condition in {hypothesis_space} must receive a probability, even if very small.
+            - Probabilities must sum to 1.0 (±0.01 tolerance).
+            - Express each probability as a decimal rounded to two places (e.g., 0.35).
+            - Return only the formatted response; no explanations or commentary.
+
+            ### Response Format
+            One line per condition:
+            <number>. <Condition Name>|<probability>
+
+            ### Example
+            1. Influenza|0.35  
+            2. Common Cold|0.25  
+            3. Pneumonia|0.30  
+            4. Allergies|0.10   
             """)
             .format(
                 self_report=self.self_report,
@@ -75,15 +70,24 @@ class Bayesian(Task):
         )
 
         output = await query_llm(prompt, self.questioner_session)
-        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
-        probs: dict = json.loads(cleaned_output)
-        adjusted_prior = {
-            h: (max(min(p, 1 - (1e-10)), 1e-10)) for h, p in probs.items()
-        }
-        total = sum(adjusted_prior.values())
-        adjusted_prior = {h: v / total for h, v in adjusted_prior.items() if v >= 0.001}
 
-        return adjusted_prior
+        # Parse LLM
+        matches: list[tuple[str, str]] = re.findall(
+            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
+        )
+
+        raw_priors = {
+            disease: max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
+            for disease, prob in matches
+        }
+
+        priors = {
+            disease: prob / sum(raw_priors.values())
+            for disease, prob in raw_priors.items()
+        }
+
+        assert len(priors) > 0, "No priors parsed!"
+        return priors
 
     @override
     async def create_questions(
@@ -163,33 +167,44 @@ class Bayesian(Task):
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
-        hypotheses_formatted = "\n".join(f"- {h}" for h in hypotheses)
-
         prompt = (
             dedent("""\
-            You are an expert medical doctor. 
-            You need to estimate the probability of a "Yes" answer for a list of different potential diseases a patient is suffering from, given a single question.
+            You are an expert medical doctor estimating the likelihood of a "yes" answer to a diagnostic question for each candidate disease.
 
-            The question is:
-            "{candidate_question}"
+            ### Checklist (conceptual)
+            - Interpret the diagnostic question.  
+            - Apply relevant medical knowledge for each disease.  
+            - Estimate the probability a patient would answer "yes" if they have the disease.  
+            - Ensure outputs strictly match the required format.
 
-            For each of the following diseases, estimate the probability that a patient would answer "Yes" to the question above if they were indeed suffering from that disease.
+            ### Inputs
+            - Question: "{candidate_question}"  
+            - Diseases: {hypothesis_space}
 
-            Diseases:
-            {hypothesis_space}
+            ### Instructions
+            - For each disease, output the probability of a "yes" response.  
+            - Probabilities must be rounded to two decimals (e.g., 0.75).  
 
-            Please provide your response ONLY as a single JSON object. The keys should be the disease and the values should be the estimated probability (a float between 0.0 and 1.0).
+            ### Response Format
+            One line per disease:
+            <sequence_number>. <Disease Name>|<probability>
 
-            Example format for the question "Do you have a fever?" (THE FOLLOWING PROBABILITIES ARE HYPOTHETICAL):
-            {{
-            "Flu": 0.33,
-            "Penumonia": 0.33,
-            "Rubella": 0.33,
-            "Anemia": 0.0
-            }}
+            **Example:**
+            1. Influenza|0.80  
+            2. Common Cold|0.50  
+
+            Return only the formatted response; do not include commentary or explanations.
+
+            ### Output Schema
+            - Input:  
+                - candidate_question: str (e.g., "Do you have a cough?")  
+                - hypothesis_space: list[str] (e.g., ["Influenza", "Common Cold"])  
+
+            - Output:  
+                - For each disease: `<Disease Name>|<probability>`
             """)
             .format(
-                hypothesis_space=hypotheses_formatted,
+                hypothesis_space=hypotheses,
                 candidate_question=question,
             )
             .strip()
@@ -198,16 +213,21 @@ class Bayesian(Task):
         output = await query_llm(prompt, self.questioner_session)
 
         # Parse LLM
-        cleaned_output = output[output.find("{") : output.rfind("}") + 1]
-        probs: dict = json.loads(cleaned_output)
+        matches: list[tuple[str, str]] = re.findall(
+            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
+        )
+
         likelihoods = {
-            item: {
-                "Yes": (adjusted_prob := (max(min(prob, 1 - (1e-10)), 1e-10))),
+            disease: {
+                "Yes": (
+                    adjusted_prob := max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
+                ),
                 "No": 1 - adjusted_prob,
             }
-            for item, prob in probs.items()
+            for disease, prob in matches
         }
-        assert len(likelihoods) > 0, f"Likelihoods empty! {output}"
+
+        assert len(likelihoods) > 0, "No likelihoods parsed!"
         return likelihoods
 
     @override
@@ -215,10 +235,15 @@ class Bayesian(Task):
         # Query LLM
         prompt = (
             dedent("""\
-            You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you questions, and you should answer each one truthfully based on your disease, by saying 'Yes' or 'No'. 
-            ONLY ANSWER WITH YES OR NO.
-            Let us begin. Here is my question:
+            You are a patient experiencing {target_item}, and I am your doctor.  
+            I will ask you questions about your condition.  
+
+            ### Instructions
+            - Answer truthfully based on your symptoms.  
+            - Review the available options before responding.  
+            - Respond using only 'Yes' or 'No'. 
+
+            ### Question
             {question}
             """)
             .format(target_item=self.task_answer, question=current_node.question)
@@ -230,7 +255,7 @@ class Bayesian(Task):
         # Parse LLM
         llm_answer = output.strip().lower()
         for child in current_node.children:
-            if child.answer.lower() in llm_answer:
+            if child.answer.strip().lower() == llm_answer:
                 return child
 
         raise RuntimeError(
