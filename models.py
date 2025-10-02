@@ -81,7 +81,7 @@ llm_models: dict[str, dict] = {
     "gpt_oss_20b": {
         "client": _together_client,
         "model_name": "openai/gpt-oss-20b",
-        "params": {"reasoning_effort": "low", "max_tokens": 4096, "temperature": 0.0},
+        "params": {"reasoning_effort": "low", "temperature": 0.0},
     },
     "dummy": {
         "client": None,
@@ -105,7 +105,9 @@ class LLMRequestSession:
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=60))
-async def query_llm(input_text: str, session: LLMRequestSession) -> str:
+async def query_llm(
+    input_text: str, session: LLMRequestSession, max_tokens: int = 4096
+) -> str:
     if session.model_key == "dummy":
         print(f"[DUMMY LLM] Prompt: {input_text}")
         return input("Enter a mock response: ")
@@ -126,6 +128,7 @@ async def query_llm(input_text: str, session: LLMRequestSession) -> str:
         model=model_name,
         messages=[{"role": "user", "content": input_text}],
         stream=False,
+        max_tokens=max_tokens,
         **extra_params,  # type: ignore
     )
 

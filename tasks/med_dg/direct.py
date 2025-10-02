@@ -114,4 +114,4 @@ class Direct(DirectPromptingTask):
             .strip()
         )
 
-        return await query_llm(prompt, self.answerer_session)
+        return await query_llm(prompt, self.answerer_session, max_tokens=50)

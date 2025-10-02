@@ -50,7 +50,9 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
             case Prediction(prediction):
                 # Create question node for prediction
                 question_node = QuestionNode(
-                    f"Is it {prediction}?", parent=current_node
+                    f"Is it {prediction}?",
+                    possible_answers=["Yes", "No"],
+                    parent=current_node,
                 )
                 current_node.children.append(question_node)
                 final_path.append(str(question_node))
@@ -69,7 +71,9 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
 
             case Question(question):
                 # Create question node for regular question
-                question_node = QuestionNode(question, parent=current_node)
+                question_node = QuestionNode(
+                    question, possible_answers=[], parent=current_node
+                )
                 current_node.children.append(question_node)
                 final_path.append(str(question_node))
 

@@ -35,18 +35,18 @@ async def main(output_dir: Path) -> None:
     dataset = load_balanced_data(0.05)
 
     tasks = [
-        BaselineWithMultibranching(
+        Direct(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             task_answer=item.disease,
-            max_question_nodes=2,
-            max_lookahead_depth=1,
-            max_conversation_depth=2,
+            # max_question_nodes=2,
+            # max_lookahead_depth=1,
+            max_conversation_depth=5,
             # confidence_threshold=0.7,
             hypothesis_space=MED_DG_SET,
             self_report=item.self_report,
         )
-        for item in dataset[1:3]
+        for item in dataset[:3]
     ]
 
     # =============== EXECUTION ===============
@@ -57,16 +57,16 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            run_tree_based_task(
-                i,
-                task,
-                output_dir,
-                semaphore,
-                sharpness_constant,
-                min_probability,
-                question_clustering,
-            )
-            # run_direct_prompting_task(i, task, output_dir, semaphore)
+            # run_tree_based_task(
+            #     i,
+            #     task,
+            #     output_dir,
+            #     semaphore,
+            #     sharpness_constant,
+            #     min_probability,
+            #     question_clustering,
+            # )
+            run_direct_prompting_task(i, task, output_dir, semaphore)
             for i, task in enumerate(tasks)
         ]
     )
