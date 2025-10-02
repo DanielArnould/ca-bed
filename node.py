@@ -10,7 +10,7 @@ class EvidenceNode:
     children: list["QuestionNode"] = field(default_factory=list)
 
     def __str__(self) -> str:
-        return f"Answer: {self.answer} | Marginal Likelihood: {self.marginal_likelihood} | Belief State: {self.belief_state}"
+        return f"Answer: '{self.answer}' | Marginal Likelihood: {self.marginal_likelihood} | Belief State: {self.belief_state}"
 
 
 @dataclass
@@ -21,7 +21,9 @@ class QuestionNode:
     children: list[EvidenceNode] = field(default_factory=list)
 
     def __str__(self) -> str:
-        return f"Question: {self.question} Possible Answers: {self.possible_answers}"
+        return (
+            f"Question: '{self.question}' | Possible Answers: {self.possible_answers}"
+        )
 
 
 def get_conversation_depth(node: EvidenceNode) -> int:
