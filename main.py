@@ -14,6 +14,7 @@ from models import LLMRequestSession
 from question_clustering import QuestionClustering
 from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.med_dg.baseline import Baseline
+from tasks.med_dg.baseline_multi import BaselineWithMultibranching
 from tasks.med_dg.bayesian import Bayesian
 from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
 from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
@@ -34,18 +35,18 @@ async def main(output_dir: Path) -> None:
     dataset = load_balanced_data(0.05)
 
     tasks = [
-        BayesianWithMultibranching(
+        BaselineWithMultibranching(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             task_answer=item.disease,
             max_question_nodes=2,
             max_lookahead_depth=1,
             max_conversation_depth=2,
-            confidence_threshold=0.7,
+            # confidence_threshold=0.7,
             hypothesis_space=MED_DG_SET,
             self_report=item.self_report,
         )
-        for item in dataset[:1]
+        for item in dataset[1:3]
     ]
 
     # =============== EXECUTION ===============
