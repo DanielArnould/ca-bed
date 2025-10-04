@@ -12,7 +12,6 @@ class Task(ABC):
     answerer_session: LLMRequestSession
     task_answer: str
     max_question_nodes: int  # Max number of questions to generate at each step
-    max_evidence_nodes: int  # Max possible number of answers to each question
     max_lookahead_depth: int
     max_conversation_depth: int
     confidence_threshold: float
@@ -24,7 +23,6 @@ class Task(ABC):
         answerer_session: LLMRequestSession,
         task_answer: str,
         max_question_nodes: int,
-        max_evidence_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
@@ -34,7 +32,6 @@ class Task(ABC):
         self.answerer_session = answerer_session
         self.task_answer = task_answer
         self.max_question_nodes = max_question_nodes
-        self.max_evidence_nodes = max_evidence_nodes
         self.max_lookahead_depth = max_lookahead_depth
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold

@@ -27,7 +27,6 @@ class BaselineWithMultibranching(Task):
             answerer_session=answerer_session,
             task_answer=task_answer,
             max_question_nodes=max_question_nodes,
-            max_evidence_nodes=2,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=1.0,
