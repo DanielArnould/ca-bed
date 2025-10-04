@@ -74,8 +74,8 @@ async def call_llm(input_text: str, model: Model) -> tuple[str, int, int]:
     response = await client.chat.completions.create(
         model=model_id,
         messages=[{"role": "user", "content": input_text}],
-        max_tokens=4096,
-        temperature=0,
+        # max_tokens=4096,
+        # temperature=0,
         n=1,
         stream=False,
         **kwargs,  # type: ignore

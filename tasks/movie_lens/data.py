@@ -25,6 +25,8 @@ Real user context:
 - Total ratings: {rating_count}
 - Average rating: {average_rating}
 - Dominant genres: {top_genres}
+- Age: {user_age}
+- Gender: {user_gender}
 
 Movies this user rated {high_threshold}/5 or higher:
 {liked_movies}
@@ -33,10 +35,11 @@ Movies this user rated {low_threshold}/5 or lower:
 {disliked_movies}
 
 Describe the persona indirectly—lean on sensory memories, themes, pacing preferences, and viewing habits rather than explicit genre lists.
+Stay aligned with the provided age and gender; do not invent conflicting details.
 Return STRICT JSON with this schema:
 {{
   "persona_name": <creative full name>,
-  "age": <integer>,
+  "age": {age_instruction},
   "summary": <two vivid sentences>,
   "preference_signature": <concise 3-6 word vibe>,
   "shortlist_genres": [<use the dominant genres above>],
@@ -46,7 +49,6 @@ Return STRICT JSON with this schema:
 Do not add commentary or code fences—JSON only."""
 
 
-MOVIES_PER_PERSONA_DEFAULT = 12
 HIGH_RATING_THRESHOLD = 4
 LOW_RATING_THRESHOLD = 2
 MIN_HIGH_RATED_MOVIES = 5
@@ -92,9 +94,17 @@ class MovieRating:
     timestamp: int
 
 
+@dataclass(frozen=True)
+class UserDemographics:
+    age: int | None
+    gender: str | None
+
+
 @dataclass
 class UserProfile:
     user_id: int
+    age: int | None
+    gender: str | None
     ratings: list[MovieRating]
     high_rated: list[MovieRating]
     low_rated: list[MovieRating]
@@ -179,6 +189,36 @@ class RatingError(RuntimeError):
     pass
 
 
+def load_user_demographics(path: Path) -> dict[int, UserDemographics]:
+    demographics: dict[int, UserDemographics] = {}
+    for line in _read_lines(path):
+        parts = line.split("|")
+        if len(parts) < 3:
+            raise ValueError(f"Malformed user line: {line!r}")
+        user_id_str, age_str, gender_str, *_rest = parts
+        user_id = int(user_id_str)
+
+        age: int | None
+        age_str = age_str.strip()
+        if age_str:
+            try:
+                age = int(age_str)
+            except ValueError as exc:
+                raise ValueError(f"Invalid age value for user {user_id}: {age_str!r}") from exc
+        else:
+            age = None
+
+        gender_str = gender_str.strip()
+        if gender_str:
+            gender_lookup = {"M": "Male", "F": "Female"}
+            gender = gender_lookup.get(gender_str.upper(), gender_str)
+        else:
+            gender = None
+
+        demographics[user_id] = UserDemographics(age=age, gender=gender)
+    return demographics
+
+
 def load_ratings_by_user(path: Path) -> dict[int, list[tuple[int, int, int]]]:
     ratings_by_user: dict[int, list[tuple[int, int, int]]] = {}
     for line in _read_lines(path):
@@ -198,6 +238,7 @@ def build_user_profiles(
     ratings_by_user: dict[int, list[tuple[int, int, int]]],
     movie_lookup: dict[int, Movie],
     min_high_rated: int,
+    user_demographics: dict[int, UserDemographics] | None = None,
     high_rating_threshold: int = HIGH_RATING_THRESHOLD,
     low_rating_threshold: int = LOW_RATING_THRESHOLD,
 ) -> list[UserProfile]:
@@ -224,9 +265,18 @@ def build_user_profiles(
         high.sort(key=lambda r: (-r.rating, r.timestamp, r.movie.id))
         low.sort(key=lambda r: (r.rating, r.timestamp, r.movie.id))
         average_rating = total_score / len(ratings) if ratings else 0.0
+        if user_demographics is not None:
+            demo = user_demographics.get(user_id)
+            profile_age = demo.age if demo else None
+            profile_gender = demo.gender if demo else None
+        else:
+            profile_age = None
+            profile_gender = None
         profiles.append(
             UserProfile(
                 user_id=user_id,
+                age=profile_age,
+                gender=profile_gender,
                 ratings=ratings,
                 high_rated=high,
                 low_rated=low,
@@ -406,11 +456,21 @@ def build_persona_prompt(
     disliked_movies_block: str,
 ) -> str:
     top_genres_text = ", ".join(top_genres) if top_genres else "None"
+    if profile.age is not None:
+        age_text = str(profile.age)
+        age_instruction = f"<integer; use the provided age of {age_text}>"
+    else:
+        age_text = "Unknown"
+        age_instruction = "<integer>"
+    gender_text = profile.gender if profile.gender is not None else "Unknown"
     return PERSONA_PROMPT_TEMPLATE.format(
         user_id=profile.user_id,
         rating_count=profile.rating_count,
         average_rating=f"{profile.average_rating:.2f}",
         top_genres=top_genres_text,
+        user_age=age_text,
+        user_gender=gender_text,
+        age_instruction=age_instruction,
         liked_movies=liked_movies_block if liked_movies_block else "None provided",
         disliked_movies=disliked_movies_block if disliked_movies_block else "None provided",
         high_threshold=HIGH_RATING_THRESHOLD,
@@ -437,6 +497,14 @@ async def generate_persona(
         raise ValueError(
             f"Persona for user {profile.user_id} response was not valid JSON: {payload_text!r}"
         ) from exc
+    if profile.age is not None:
+        persona["age"] = profile.age
+    else:
+        persona.setdefault("age", None)
+    if profile.gender is not None:
+        persona["gender"] = profile.gender
+    else:
+        persona.setdefault("gender", None)
     persona["shortlist_genres"] = top_genres
     persona["source_user_id"] = profile.user_id
     persona["rating_count"] = profile.rating_count
@@ -478,20 +546,21 @@ def validate_persona(persona: dict[str, Any], genre_catalog: list[str]) -> dict[
 
 async def build_curated_dataset(
     persona_count: int,
-    movies_per_persona: int,
     paths: MovieLensPaths,
     model: Model,
     seed: int,
     max_concurrency: int,
-    pool_size: int,
+    pool_size: int | None,
 ) -> dict[str, Any]:
     genre_catalog = load_genre_catalog(paths.genres)
     movies = load_movies(paths.movies, genre_catalog)
     movie_lookup = build_movie_lookup(movies)
+    user_demographics = load_user_demographics(paths.users)
     ratings_by_user = load_ratings_by_user(paths.ratings)
     profiles = build_user_profiles(
         ratings_by_user,
         movie_lookup,
+        user_demographics=user_demographics,
         min_high_rated=MIN_HIGH_RATED_MOVIES,
     )
 
@@ -505,6 +574,15 @@ async def build_curated_dataset(
         )
 
     movies_by_genre = build_movies_by_genre(movies)
+
+    if pool_size is None:
+        pool_size = len(movies)
+    requested_pool_size = pool_size
+
+    if pool_size < len(genre_catalog):
+        raise ValueError(
+            f"pool_size={pool_size} must be at least the number of genres ({len(genre_catalog)})"
+        )
 
     if pool_size > len(movies):
         LOGGER.warning(
@@ -520,15 +598,6 @@ async def build_curated_dataset(
     else:
         selected_profiles = profiles.copy()
 
-    favorites_by_user = {
-        profile.user_id: profile.high_rated[:movies_per_persona]
-        for profile in selected_profiles
-    }
-    required_movies = [
-        record.movie for records in favorites_by_user.values() for record in records
-    ]
-    pool_size = max(pool_size, len(genre_catalog), len(required_movies))
-
     semaphore = asyncio.Semaphore(max_concurrency)
     persona_results = await asyncio.gather(
         *[generate_persona(profile, model, semaphore) for profile in selected_profiles]
@@ -539,9 +608,8 @@ async def build_curated_dataset(
         genre_catalog=genre_catalog,
         pool_size=pool_size,
         rng=rng,
-        required_movies=required_movies,
+        required_movies=None,
     )
-    pool_ids = {movie.id for movie in hypothesis_pool}
 
     curated_entries: list[dict[str, Any]] = []
     total_prompt_tokens = 0
@@ -554,21 +622,8 @@ async def build_curated_dataset(
         total_prompt_tokens += prompt_tokens
         total_completion_tokens += completion_tokens
 
-        favorites = favorites_by_user[profile.user_id]
-        if len(favorites) < movies_per_persona:
-            LOGGER.warning(
-                "User %s has only %s high-rated movies; using all available.",
-                profile.user_id,
-                len(favorites),
-            )
-        favorites = favorites[:movies_per_persona]
-        missing = [record.movie.id for record in favorites if record.movie.id not in pool_ids]
-        if missing:
-            raise RuntimeError(
-                f"Hypothesis pool is missing required favorites for user {profile.user_id}: {missing}"
-            )
-
-        disliked = profile.low_rated[:movies_per_persona]
+        favorites = profile.high_rated
+        disliked = profile.low_rated
 
         curated_entries.append(
             {
@@ -587,7 +642,7 @@ async def build_curated_dataset(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": str(paths.data_dir),
         "persona_count": persona_count,
-        "movies_per_persona": movies_per_persona,
+        "requested_hypothesis_pool_size": requested_pool_size,
         "hypothesis_pool_size": len(hypothesis_pool),
         "model": model.name,
         "seed": seed,
@@ -627,8 +682,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=default_data_dir, help="Directory containing raw MovieLens 100K files")
     parser.add_argument("--output", type=Path, default=None, help="Path to write movielens_curated.json (defaults to <data-dir>/movielens_curated.json)")
     parser.add_argument("--count", type=int, default=5, help="Number of personas to generate")
-    parser.add_argument("--movies-per-persona", type=int, default=MOVIES_PER_PERSONA_DEFAULT, help="Number of movies to mark as persona favorites")
-    parser.add_argument("--pool-size", type=int, default=None, help="Total number of movies in the combined hypothesis pool (defaults to count * movies-per-persona)")
+    parser.add_argument("--pool-size", type=int, default=None, help="Total number of movies in the combined hypothesis pool (defaults to entire catalog when omitted)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for movie selection")
     parser.add_argument("--model", type=str, default="GPT_5", help="Model enum name to use for persona generation")
     parser.add_argument("--max-concurrency", type=int, default=3, help="Maximum simultaneous LLM calls")
@@ -640,12 +694,8 @@ def parse_args() -> argparse.Namespace:
         args.output = args.data_dir / "movielens_curated.json"
     if args.count <= 0:
         raise SystemExit("--count must be positive")
-    if args.movies_per_persona <= 0:
-        raise SystemExit("--movies-per-persona must be positive")
     if args.pool_size is not None and args.pool_size <= 0:
         raise SystemExit("--pool-size must be positive when provided")
-    if args.pool_size is not None and args.pool_size < args.movies_per_persona:
-        raise SystemExit("--pool-size must be at least --movies-per-persona")
     if args.max_concurrency <= 0:
         raise SystemExit("--max-concurrency must be positive")
     return args
@@ -662,6 +712,7 @@ def resolve_model(model_name: str) -> Model:
 class PersonaRecord:
     persona_name: str
     age: int | None
+    gender: str | None
     summary: str
     preference_signature: str
     shortlist_genres: list[str]
@@ -715,6 +766,7 @@ def _persona_from_payload(payload: dict[str, Any]) -> PersonaRecord:
     return PersonaRecord(
         persona_name=payload.get("persona_name", "Unknown"),
         age=payload.get("age"),
+        gender=payload.get("gender"),
         summary=payload.get("summary", ""),
         preference_signature=payload.get("preference_signature", ""),
         shortlist_genres=list(payload.get("shortlist_genres", [])),
@@ -815,11 +867,10 @@ async def async_main() -> None:
     configure_logging(args.verbose)
     paths = MovieLensPaths.build(args.data_dir)
     model = resolve_model(args.model)
-    pool_size = args.pool_size or (args.count * args.movies_per_persona)
+    pool_size = args.pool_size
 
     dataset = await build_curated_dataset(
         persona_count=args.count,
-        movies_per_persona=args.movies_per_persona,
         paths=paths,
         model=model,
         seed=args.seed,
@@ -839,6 +890,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    records, hyp_set = load_balanced_dataset()
-    print(hyp_set)
-    # main()
+    # records, hyp_set = load_balanced_dataset()
+    # print(hyp_set)
+    main()

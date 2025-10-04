@@ -16,6 +16,10 @@ from question_clustering import QuestionClustering
 from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.twenty_questions.bayesian import Bayesian
 from tasks.twenty_questions.baseline import Baseline
+from tasks.movie_lens.baseline import Baseline as MovieLensBaseline
+from tasks.movie_lens.bayesian import Bayesian as MovieLensBayesian
+from tasks.movie_lens.data import load_balanced_dataset
+from tasks.movie_lens.common import persona_record_to_context
 from tasks.task import Task
 from tasks.twenty_questions.data import (
     BIG_BENCH_CONCEPT,
@@ -107,22 +111,23 @@ async def run_single_task(
 async def main() -> None:
     # =============== CONFIG ===============
     benchmark_model = Model.GPT_OSS_20B
-    method_model = Model.GPT_OSS_20B
+    method_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
     sharpness_constant = 0.4
     max_concurrent = 1
     clustering_threshold = 0.97
-    dataset = Places
+    dataset, movie_set = load_balanced_dataset()
 
     tasks = [
-        Baseline(
-            task_answer=item,
+        MovieLensBayesian(
             max_question_nodes=2,
+            max_conversation_depth=5,
             max_lookahead_depth=3,
-            max_conversation_depth=20,
-            # confidence_threshold=0.7,
-            hypothesis_space=dataset,
+            persona=persona_record_to_context(
+                item.persona, item.preferred_movies, item.disliked_movies),
+            candidate_movies=movie_set,
+            confidence_threshold=1
         )
-        for item in dataset
+        for item in dataset[0:1]
     ]
 
     # =============== EXECUTION ===============
@@ -130,7 +135,8 @@ async def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(output_dir)
 
-    LOGGER.info(f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
+    LOGGER.info(
+        f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
     question_clustering = QuestionClustering(clustering_threshold)
 
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -161,3 +167,17 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # dataset, movie_set = load_balanced_dataset()
+    # item = dataset[0]
+    # task = MovieLensBaseline(
+    #     max_question_nodes=2,
+    #     max_conversation_depth=5,
+    #     max_lookahead_depth=3,
+    #     persona=persona_record_to_context(
+    #         item.persona, item.preferred_movies, item.disliked_movies),
+    #     candidate_movies=movie_set
+    # )
+
+    # # print(len(movie_set))
+
+    # print(task._persona_block)
