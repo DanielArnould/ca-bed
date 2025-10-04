@@ -17,6 +17,7 @@ from tasks.detective_cases.baseline_multi import BaselineWithMultibranching
 from tasks.detective_cases.bayesian import Bayesian
 from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
 from tasks.detective_cases.data import load_all_data
+from tasks.detective_cases.direct import Direct
 from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.task import Task
 
@@ -35,16 +36,16 @@ async def main(output_dir: Path) -> None:
     dataset = load_all_data()
 
     tasks = [
-        Baseline(
+        Direct(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
-            max_question_nodes=2,
-            max_lookahead_depth=3,
+            # max_question_nodes=2,
+            # max_lookahead_depth=3,
             max_conversation_depth=5,
             # confidence_threshold=0.95,
         )
-        for item in dataset[:1]
+        for item in dataset[1:2]
     ]
 
     # =============== EXECUTION ===============
@@ -57,18 +58,21 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            run_tree_based_task(
-                idx=i,
-                task=task,
-                output_dir=output_dir,
-                semaphore=semaphore,
-                sharpness_constant=sharpness_constant,
-                min_probability=min_probability,
-                question_clustering=(
-                    shared_clustering
-                    if shared_question_cluster
-                    else QuestionClustering(clustering_threshold)
-                ),  # type: ignore
+            # run_tree_based_task(
+            #     idx=i,
+            #     task=task,
+            #     output_dir=output_dir,
+            #     semaphore=semaphore,
+            #     sharpness_constant=sharpness_constant,
+            #     min_probability=min_probability,
+            #     question_clustering=(
+            #         shared_clustering
+            #         if shared_question_cluster
+            #         else QuestionClustering(clustering_threshold)
+            #     ),  # type: ignore
+            # )
+            run_direct_prompting_task(
+                idx=i, task=task, output_dir=output_dir, semaphore=semaphore
             )
             for i, task in enumerate(tasks)
         ]
