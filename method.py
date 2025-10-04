@@ -121,7 +121,10 @@ async def expand_questions(
         for answer in answers:
             likelihoods = cluster.get_likelihoods_for_answer(answer)
             posterior, marginal = calculate_posterior(
-                current_node.parent.belief_state, likelihoods, min_probability
+                current_node.parent.belief_state,
+                likelihoods,
+                min_probability,
+                1 / len(answers),
             )
             evidence_node = EvidenceNode(
                 answer=answer,
@@ -142,14 +145,21 @@ async def expand_questions(
 
 
 def calculate_posterior(
-    prior: dict[str, float], likelihoods: dict[str, float], min_probability: float
+    prior: dict[str, float],
+    likelihoods: dict[str, float],
+    min_probability: float,
+    uniform_likelihood: float,
 ) -> tuple[dict[str, float], float]:
-    all_posteriors = {h: p * likelihoods.get(h, 1.0) for h, p in prior.items()}
+    all_posteriors = {
+        h: p * likelihoods.get(h, uniform_likelihood) for h, p in prior.items()
+    }
 
     # Warn for missing likelihoods
     for h in prior:
         if h not in likelihoods:
-            logger.warning(f"{h} not found in likelihoods! Defaulting to 1...")
+            logger.warning(
+                f"{h} not found in likelihoods! Defaulting to {uniform_likelihood}..."
+            )
 
     unnormalised = {h: p for h, p in all_posteriors.items() if p >= min_probability}
 
