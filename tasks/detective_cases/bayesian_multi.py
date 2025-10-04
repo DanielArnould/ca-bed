@@ -1,6 +1,8 @@
 import re
 from textwrap import dedent
 from typing import override
+
+from tenacity import retry, stop_after_attempt
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.detective_cases.data import DetectiveCasesInstance
@@ -30,7 +32,11 @@ class BayesianWithMultibranching(Task):
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=self.instance["murderer"],
+            task_answer=next(
+                suspect["name"]
+                for suspect in self.instance["suspects"]
+                if suspect.get("is_murderer", False)
+            ),
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
@@ -172,6 +178,7 @@ class BayesianWithMultibranching(Task):
         return {question.question: question.possible_answers for question in questions}
 
     @override
+    @retry(stop=stop_after_attempt(2))
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:

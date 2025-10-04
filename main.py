@@ -28,6 +28,7 @@ async def main(output_dir: Path) -> None:
     min_probability = 0.001
     max_concurrent = 1
     clustering_threshold = 0.99
+    shared_question_cluster = False
     dataset = load_all_data()
 
     tasks = [
@@ -40,27 +41,32 @@ async def main(output_dir: Path) -> None:
             max_conversation_depth=5,
             confidence_threshold=0.95,
         )
-        for item in dataset[:1]
+        for item in dataset[1:2]
     ]
 
     # =============== EXECUTION ===============
     logger.info(f"Questioner: {questioner_model_key} Answerer: {answerer_model_key}")
-    question_clustering = QuestionClustering(clustering_threshold)
+    shared_clustering = (
+        QuestionClustering(clustering_threshold) if shared_question_cluster else None
+    )
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
     await asyncio.gather(
         *[
             run_tree_based_task(
-                i,
-                task,
-                output_dir,
-                semaphore,
-                sharpness_constant,
-                min_probability,
-                question_clustering,
+                idx=i,
+                task=task,
+                output_dir=output_dir,
+                semaphore=semaphore,
+                sharpness_constant=sharpness_constant,
+                min_probability=min_probability,
+                question_clustering=(
+                    shared_clustering
+                    if shared_question_cluster
+                    else QuestionClustering(clustering_threshold)
+                ),  # type: ignore
             )
-            # run_direct_prompting_task(i, task, output_dir, semaphore)
             for i, task in enumerate(tasks)
         ]
     )

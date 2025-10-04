@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 
 
 class VictimInformation(TypedDict):
@@ -16,24 +16,11 @@ class SuspectOverview(TypedDict):
     introduction: str
 
 
-class TimelineEvent(TypedDict):
-    time: str
-    activity: str
-
-
 class SuspectInformation(TypedDict):
     name: str
     introduction: str
-    relationship: str
-    reason_at_scene: list[str]
-    suspicion: list[str]
-    motive: list[str]
-    opportunity: list[str]
-    access_to_weapon: list[str]
-    is_murderer: bool
-    evidence: str
-    testimony: list[str]
-    timeline: list[TimelineEvent]
+    # There is always a character unaware of the murder, who is definitely not the murderer
+    is_murderer: NotRequired[bool]
     story: str
     task: str
 
@@ -51,8 +38,6 @@ class DetectiveCasesInstance(TypedDict):
     victim: VictimInformation
     suspects: list[SuspectInformation]
     initial_information: InitialInformation
-    murderer: str
-    explanation: str
 
 
 def load_all_data() -> list[DetectiveCasesInstance]:
@@ -65,4 +50,3 @@ def load_all_data() -> list[DetectiveCasesInstance]:
 
 if __name__ == "__main__":
     data = load_all_data()
-    print(len(data))
