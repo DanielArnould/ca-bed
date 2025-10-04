@@ -2,8 +2,9 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 
-from sentence_transformers import SentenceTransformer
 from voyager import Index, Space
+
+from globals import SENTENCE_TRANSFORMER
 
 logger = logging.getLogger("Question Clustering")
 
@@ -42,20 +43,15 @@ class QuestionClustering:
     index: Index
     clusters: dict[str, Cluster]
     threshold: float
-    model: SentenceTransformer
 
     def __init__(self, threshold: float):
         logger.info(f"Setting up question cluster with threshold '{threshold}'")
-        self.model = SentenceTransformer(
-            "quora-distilbert-multilingual",
-            backend="onnx",
-        )
         self.index = Index(Space.Cosine, num_dimensions=768)
         self.threshold = threshold
         self.clusters = {}
 
     def get_cluster(self, question: str) -> Cluster:
-        embedding = self.model.encode(
+        embedding = SENTENCE_TRANSFORMER.encode(
             question, convert_to_numpy=True, normalize_embeddings=False
         )
         neighbours, distances = (
