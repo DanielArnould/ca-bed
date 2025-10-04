@@ -12,6 +12,7 @@ from history import (
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
+from tasks.detective_cases.baseline import Baseline
 from tasks.detective_cases.baseline_multi import BaselineWithMultibranching
 from tasks.detective_cases.bayesian import Bayesian
 from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
@@ -34,7 +35,7 @@ async def main(output_dir: Path) -> None:
     dataset = load_all_data()
 
     tasks = [
-        BaselineWithMultibranching(
+        Baseline(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
@@ -43,7 +44,7 @@ async def main(output_dir: Path) -> None:
             max_conversation_depth=5,
             # confidence_threshold=0.95,
         )
-        for item in dataset[1:2]
+        for item in dataset[:1]
     ]
 
     # =============== EXECUTION ===============

@@ -9,13 +9,13 @@ from tasks.detective_cases.data import DetectiveCasesInstance
 from tasks.task import (
     Task,
     parse_answer,
+    parse_binary_questions,
     parse_categorical_likelihoods,
-    parse_questions,
     parse_uniform_probabilities,
 )
 
 
-class BaselineWithMultibranching(Task):
+class Baseline(Task):
     instance: DetectiveCasesInstance
 
     def __init__(
@@ -44,7 +44,7 @@ class BaselineWithMultibranching(Task):
         )
 
     def __str__(self) -> str:
-        return f"Detective Cases (Baseline + Multibranching): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
+        return f"Detective Cases (Baseline): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
@@ -149,29 +149,29 @@ class BaselineWithMultibranching(Task):
         parts.append(
             dedent(f"""\
             ### Task
-            Generate {self.max_question_nodes} excellent interrogation questions.  
+            Generate {self.max_question_nodes} excellent yes/no interrogation questions.  
             - Each question must be explicitly directed to a specific suspect.  
             - Format the question as: "[Suspect Name] Question text", with no ; or | in the question text. 
-            - Provide a realistic set of possible answers for that suspect.  
+            - Each question can only answered by 'Yes' or 'No'
             - Focus on questions that help distinguish between suspects (motive, alibi, opportunity, access to weapon).
 
             ### Response Format
             One line per question:
-            1. <Question 1>|Answer1;Answer2;Answer3
-            2. <Question 2>|Answer1;Answer2
+            1. <Question 1>
+            2. <Question 2>
             ...
-            n. <Question n>|Answer1;Answer2;Answer3;...;AnswerK
+            n. <Question n>
 
             ### Example
-            1. [Alice] Where were you at the time of the murder?|In the kitchen;In the garden;With the victim  
-            2. [Bob] Did you have access to the murder weapon?|Yes;No
+            1. [Alice] Were you outside at 12:00PM? 
+            2. [Bob] Did you have access to the murder weapon?
             """).strip()
         )
 
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
-        questions = parse_questions(output)
+        questions = parse_binary_questions(output)
 
         return {question.question: question.possible_answers for question in questions}
 
@@ -212,17 +212,17 @@ class BaselineWithMultibranching(Task):
 
             ### Task
             - Interpret the question and possible answers.  
-            - For each suspect, assume they are the murderer and decide which answer {answerer_name} would most likely give.  
-            - Assign each suspect to exactly one of the provided answers (no omissions, no duplicates).  
+            - For each suspect, assume they are the murderer and decide whether {answerer_name} would most likely say 'Yes' or 'No'.  
+            - Assign each suspect to exactly one of 'Yes' or 'No' (no omissions, no duplicates).  
             - Use the suspect names exactly as given.
             - Display the answers exactly in the order as given.
 
             ### Response Format
 
-            <ANSWER1>: Suspect_1, Suspect_2, ...
-            Count of <ANSWER1>: <integer>
-            <ANSWER2>: Suspect_3, Suspect_4, ...
-            Count of <ANSWER2>: <integer>
+            Yes: Suspect_1, Suspect_2, ...
+            Count of 'Yes': <integer>
+            No: Suspect_3, Suspect_4, ...
+            Count of 'No': <integer>
 
             ### Example
 
@@ -254,7 +254,6 @@ class BaselineWithMultibranching(Task):
             None,
         )
         assert suspect is not None, f"Suspect '{suspect_name}' not found in case data"
-        answers = [child.answer for child in current_node.children]
 
         prompt = dedent(f"""\
             You are roleplaying as a suspect in a murder investigation.
@@ -268,7 +267,7 @@ class BaselineWithMultibranching(Task):
             - Answer the detective's question in character as {suspect_name}.
             - Stay consistent with your task and story.
             - You may lie, evade, or tell the truth depending on what seems natural for this suspect.
-            - You must ONLY respond with one of the following option, matching it EXACTLY: {answers}
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
             - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Detective's Question

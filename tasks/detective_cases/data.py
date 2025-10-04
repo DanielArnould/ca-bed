@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import random
 from typing import NotRequired, TypedDict, cast
 
 
@@ -45,8 +46,22 @@ def load_all_data() -> list[DetectiveCasesInstance]:
     with data_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
+    # Murderer is always index 0
+    random.seed(42)
+    for instance in data:
+        random.shuffle(instance["suspects"])
+
     return cast(list[DetectiveCasesInstance], data)
 
 
 if __name__ == "__main__":
     data = load_all_data()
+
+    for inst in data:
+        print(
+            next(
+                i
+                for i in range(len(inst["suspects"]))
+                if inst["suspects"][i].get("is_murderer", False)
+            )
+        )
