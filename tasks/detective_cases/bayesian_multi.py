@@ -44,6 +44,9 @@ class BayesianWithMultibranching(Task):
             hypothesis_space=[suspect["name"] for suspect in self.instance["suspects"]],
         )
 
+    def __str__(self) -> str:
+        return f"Detective Cases (Bayesian + Multibranching): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
+
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
         suspects_info_parts = []
