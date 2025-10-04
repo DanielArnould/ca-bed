@@ -96,6 +96,28 @@ def parse_questions(output: str) -> list[Question]:
     return questions
 
 
+def parse_binary_questions(output: str) -> list[Question]:
+    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\d+\.|$))", re.DOTALL)
+    matches = pattern.findall(output)
+
+    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
+    allowed_chars.remove("|")
+
+    def sanitise(text: str) -> str:
+        return "".join(c for c in text if c in allowed_chars).strip()
+
+    questions = [
+        Question(question=sanitise(q_text), possible_answers=["Yes", "No"])
+        for _, q_text in matches
+        if sanitise(q_text)
+    ]
+
+    if not questions:
+        raise ValueError(f"No valid questions found in the output: {output}")
+
+    return questions
+
+
 @dataclass
 class Likelihood:
     hypothesis: str
@@ -133,12 +155,12 @@ def parse_likelihoods(output: str) -> list[Likelihood]:
 
 
 @dataclass
-class Prior:
+class Probability:
     hypothesis: str
     probability: float
 
 
-def parse_priors(output: str) -> list[Prior]:
+def parse_probabilities(output: str) -> list[Probability]:
     allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
     allowed_chars.discard("|")
 
@@ -149,22 +171,22 @@ def parse_priors(output: str) -> list[Prior]:
     matches = pattern.findall(output)
 
     if not matches:
-        raise ValueError(f"No valid priors found in the output: {output}")
+        raise ValueError(f"No valid probabilities found in the output: {output}")
 
-    priors_list = []
+    probabilities = []
     for hypothesis, prob_text in matches:
         sanitised_hypothesis = sanitise(hypothesis)
         probability = max(min(float(prob_text.strip()), 1 - 1e-10), 1e-10)
-        priors_list.append(
-            Prior(hypothesis=sanitised_hypothesis, probability=probability)
+        probabilities.append(
+            Probability(hypothesis=sanitised_hypothesis, probability=probability)
         )
 
-    total = sum(p.probability for p in priors_list)
+    total = sum(p.probability for p in probabilities)
     if total > 0:
-        for p in priors_list:
+        for p in probabilities:
             p.probability /= total
 
-    return priors_list
+    return probabilities
 
 
 def parse_answer(output: str, question_node: QuestionNode) -> EvidenceNode:

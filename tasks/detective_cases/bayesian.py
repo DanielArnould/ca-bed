@@ -9,13 +9,12 @@ from tasks.detective_cases.data import DetectiveCasesInstance
 from tasks.task import (
     Task,
     parse_answer,
-    parse_likelihoods,
+    parse_binary_questions,
     parse_probabilities,
-    parse_questions,
 )
 
 
-class BayesianWithMultibranching(Task):
+class Bayesian(Task):
     instance: DetectiveCasesInstance
 
     def __init__(
@@ -45,7 +44,7 @@ class BayesianWithMultibranching(Task):
         )
 
     def __str__(self) -> str:
-        return f"Detective Cases (Bayesian + Multibranching): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
+        return f"Detective Cases (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
@@ -154,29 +153,29 @@ class BayesianWithMultibranching(Task):
         parts.append(
             dedent(f"""\
             ### Task
-            Generate {self.max_question_nodes} excellent interrogation questions.  
+            Generate {self.max_question_nodes} excellent yes/no interrogation questions.  
             - Each question must be explicitly directed to a specific suspect.  
             - Format the question as: "[Suspect Name] Question text", with no ; or | in the question text. 
-            - Provide a realistic set of possible answers for that suspect.  
+            - Each question can only answered by 'Yes' or 'No'
             - Focus on questions that help distinguish between suspects (motive, alibi, opportunity, access to weapon).
 
             ### Response Format
             One line per question:
-            1. <Question 1>|Answer1;Answer2;Answer3
-            2. <Question 2>|Answer1;Answer2
+            1. <Question 1>
+            2. <Question 2>
             ...
-            n. <Question n>|Answer1;Answer2;Answer3;...;AnswerK
+            n. <Question n>
 
             ### Example
-            1. [Alice] Where were you at the time of the murder?|In the kitchen;In the garden;With the victim  
-            2. [Bob] Did you have access to the murder weapon?|Yes;No
+            1. [Alice] Were you outside at 12:00PM? 
+            2. [Bob] Did you have access to the murder weapon?
             """).strip()
         )
 
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
-        questions = parse_questions(output)
+        questions = parse_binary_questions(output)
 
         return {question.question: question.possible_answers for question in questions}
 
@@ -212,41 +211,35 @@ class BayesianWithMultibranching(Task):
             ### Question to {answerer_name}
             "{actual_question}"
 
-            ### {len(answers)} Possible Answers
-            {answers}
-
             ### Task
-            For each suspect, estimate the likelihood that {answerer_name} would give each answer,
+            For each suspect, estimate the likelihood that {answerer_name} would answer 'Yes',
             assuming each suspect is the murderer. Probabilities must:
-            - Align with the provided answers in order
-            - Sum to 1.0 (±0.01)
             - Be rounded to two decimals
-
-            If verification fails, return only one of:
-            - "ERROR: Number of probabilities does not match the number of possible answers."
-            - "ERROR: Probabilities do not sum to 1.0."
 
             ### Response Format
             One line per suspect:
-            <sequence_number>. <Suspect Name>|<prob_answer_1>;<prob_answer_2>;...;<prob_answer_n>
+            <sequence_number>. <Suspect Name>|<probability>
 
             ### Example
-            1. Ms. Alice|0.80;0.10;0.10
-            2. Dr. Bob|0.50;0.40;0.10
+            1. Ms. Alice|0.80
+            2. Dr. Bob|0.40
 
             Do not include commentary or explanations. Return only the formatted response.
         """)
 
         # Query LLM
         output = await query_llm(prompt, self.questioner_session)
-        likelihoods = parse_likelihoods(output)
-        return {
-            likelihood.hypothesis: {
-                ans: prob
-                for ans, prob in zip(answers, likelihood.likelihoods, strict=True)
+        probabilities = parse_probabilities(output)
+
+        likelihoods = {
+            probability.hypothesis: {
+                "Yes": probability.probability,
+                "No": 1 - probability.probability,
             }
-            for likelihood in likelihoods
+            for probability in probabilities
         }
+
+        return likelihoods
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
@@ -257,7 +250,6 @@ class BayesianWithMultibranching(Task):
             None,
         )
         assert suspect is not None, f"Suspect '{suspect_name}' not found in case data"
-        answers = [child.answer for child in current_node.children]
 
         prompt = dedent(f"""\
             You are roleplaying as a suspect in a murder investigation.
@@ -271,7 +263,7 @@ class BayesianWithMultibranching(Task):
             - Answer the detective's question in character as {suspect_name}.
             - Stay consistent with your task and story.
             - You may lie, evade, or tell the truth depending on what seems natural for this suspect.
-            - You must ONLY respond with one of the following option, matching it EXACTLY: {answers}
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
             - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Detective's Question
