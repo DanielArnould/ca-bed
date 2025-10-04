@@ -12,13 +12,9 @@ from history import (
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
+from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
+from tasks.detective_cases.data import load_all_data
 from tasks.direct_prompting_task import DirectPromptingTask
-from tasks.med_dg.baseline import Baseline
-from tasks.med_dg.baseline_multi import BaselineWithMultibranching
-from tasks.med_dg.bayesian import Bayesian
-from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
-from tasks.med_dg.data import MED_DG_SET, load_all_data, load_balanced_data
-from tasks.med_dg.direct import Direct
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -31,22 +27,20 @@ async def main(output_dir: Path) -> None:
     sharpness_constant = 0.4
     min_probability = 0.001
     max_concurrent = 1
-    clustering_threshold = 0.97
-    dataset = load_balanced_data(0.05)
+    clustering_threshold = 0.99
+    dataset = load_all_data()
 
     tasks = [
-        Direct(
+        BayesianWithMultibranching(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
-            task_answer=item.disease,
-            # max_question_nodes=2,
-            # max_lookahead_depth=1,
+            instance=item,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
             max_conversation_depth=5,
-            # confidence_threshold=0.7,
-            hypothesis_space=MED_DG_SET,
-            self_report=item.self_report,
+            confidence_threshold=0.95,
         )
-        for item in dataset[:3]
+        for item in dataset[:1]
     ]
 
     # =============== EXECUTION ===============
@@ -57,16 +51,16 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            # run_tree_based_task(
-            #     i,
-            #     task,
-            #     output_dir,
-            #     semaphore,
-            #     sharpness_constant,
-            #     min_probability,
-            #     question_clustering,
-            # )
-            run_direct_prompting_task(i, task, output_dir, semaphore)
+            run_tree_based_task(
+                i,
+                task,
+                output_dir,
+                semaphore,
+                sharpness_constant,
+                min_probability,
+                question_clustering,
+            )
+            # run_direct_prompting_task(i, task, output_dir, semaphore)
             for i, task in enumerate(tasks)
         ]
     )
