@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import re
 import string
+from globals import SENTENCE_TRANSFORMER
+
 from models import LLMRequestSession
 from node import EvidenceNode, QuestionNode
 
@@ -70,7 +72,7 @@ class Question:
 
 
 def parse_questions(output: str) -> list[Question]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)\|(.+?)(?=(?:\d+\.|$))", re.DOTALL)
+    pattern = re.compile(r"(\d+)\.\s*(.+?)[\|;](.+?)(?=(?:\d+\.|$))", re.DOTALL)
     matches = pattern.findall(output)
 
     allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
@@ -87,27 +89,6 @@ def parse_questions(output: str) -> list[Question]:
             questions.append(
                 Question(question=question, possible_answers=possible_answers)
             )
-
-    if not questions:
-        raise ValueError(f"No valid questions found in the output: {output}")
-
-    return questions
-
-
-def parse_questions_only(output: str) -> list[Question]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\d+\.|$))", re.DOTALL)
-    matches = pattern.findall(output)
-
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.discard("|")
-
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
-
-    questions = [
-        Question(question=sanitise(q_text), possible_answers=["Yes", "No"])
-        for _, q_text in matches
-    ]
 
     if not questions:
         raise ValueError(f"No valid questions found in the output: {output}")
@@ -149,3 +130,63 @@ def parse_likelihoods(output: str) -> list[Likelihood]:
         )
 
     return likelihoods_list
+
+
+@dataclass
+class Prior:
+    hypothesis: str
+    probability: float
+
+
+def parse_priors(output: str) -> list[Prior]:
+    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
+    allowed_chars.discard("|")
+
+    def sanitise(text: str) -> str:
+        return "".join(c for c in text if c in allowed_chars).strip()
+
+    pattern = re.compile(r"\d+\.\s*([^|]+)\|([\d.]+)", re.MULTILINE)
+    matches = pattern.findall(output)
+
+    if not matches:
+        raise ValueError(f"No valid priors found in the output: {output}")
+
+    priors_list = []
+    for hypothesis, prob_text in matches:
+        sanitised_hypothesis = sanitise(hypothesis)
+        probability = max(min(float(prob_text.strip()), 1 - 1e-10), 1e-10)
+        priors_list.append(
+            Prior(hypothesis=sanitised_hypothesis, probability=probability)
+        )
+
+    total = sum(p.probability for p in priors_list)
+    if total > 0:
+        for p in priors_list:
+            p.probability /= total
+
+    return priors_list
+
+
+def parse_answer(output: str, question_node: QuestionNode) -> EvidenceNode:
+    llm_answer = output.strip().lower()
+
+    # First try exact match (case-insensitive)
+    for child in question_node.children:
+        if child.answer.strip().lower() == llm_answer:
+            return child
+
+    # Fall back to semantic similarity
+    candidate_answers = [c.answer.strip() for c in question_node.children]
+    answer_embeddings = SENTENCE_TRANSFORMER.encode(
+        candidate_answers, convert_to_tensor=True, normalize_embeddings=True
+    )
+    output_embedding = SENTENCE_TRANSFORMER.encode(
+        [llm_answer], convert_to_tensor=True, normalize_embeddings=True
+    )
+    similarities = SENTENCE_TRANSFORMER.similarity(
+        output_embedding, answer_embeddings
+    ).squeeze(0)
+    best_idx = int(similarities.argmax().item())
+    best_child = question_node.children[best_idx]
+
+    return best_child

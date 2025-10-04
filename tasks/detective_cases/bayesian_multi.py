@@ -4,7 +4,13 @@ from typing import override
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.detective_cases.data import DetectiveCasesInstance
-from tasks.task import Task
+from tasks.task import (
+    Task,
+    parse_answer,
+    parse_likelihoods,
+    parse_priors,
+    parse_questions,
+)
 
 
 class BayesianWithMultibranching(Task):
@@ -74,23 +80,9 @@ class BayesianWithMultibranching(Task):
             """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
+        priors = parse_priors(output)
 
-        matches: list[tuple[str, str]] = re.findall(
-            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
-        )
-
-        raw_priors = {
-            suspect: max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
-            for suspect, prob in matches
-        }
-
-        priors = {
-            suspect: prob / sum(raw_priors.values())
-            for suspect, prob in raw_priors.items()
-        }
-
-        assert len(priors) > 0, "No priors parsed!"
-        return priors
+        return {prior.hypothesis: prior.probability for prior in priors}
 
     @override
     async def create_questions(
@@ -155,13 +147,16 @@ class BayesianWithMultibranching(Task):
             ### Task
             Generate {self.max_question_nodes} excellent interrogation questions.  
             - Each question must be explicitly directed to a specific suspect.  
-            - Format the question as: "[Suspect Name] Question text".  
+            - Format the question as: "[Suspect Name] Question text", with no ; or | in the question text. 
             - Provide a realistic set of possible answers for that suspect.  
             - Focus on questions that help distinguish between suspects (motive, alibi, opportunity, access to weapon).
 
             ### Response Format
             One line per question:
-            <number>. <Question>|<Answer1>;<Answer2>; ...;<AnswerK>
+            1. <Question 1>|Answer1;Answer2;Answer3
+            2. <Question 2>|Answer1;Answer2
+            ...
+            n. <Question n>|Answer1;Answer2;Answer3;...;AnswerK
 
             ### Example
             1. [Alice] Where were you at the time of the murder?|In the kitchen;In the garden;With the victim  
@@ -172,19 +167,9 @@ class BayesianWithMultibranching(Task):
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
+        questions = parse_questions(output)
 
-        # Parse LLM output
-        matches: list[tuple[str, str]] = re.findall(
-            r"\d+\.\s*(.*?)\|(.*)", output, re.MULTILINE
-        )
-
-        questions = {
-            question.strip(): [a.strip() for a in answers.split(";")]
-            for question, answers in matches
-        }
-
-        assert len(questions) > 0, "No questions generated!"
-        return questions
+        return {question.question: question.possible_answers for question in questions}
 
     @override
     async def get_likelihoods(
@@ -217,7 +202,7 @@ class BayesianWithMultibranching(Task):
             ### Question to {answerer_name}
             "{actual_question}"
 
-            ### Possible Answers
+            ### {len(answers)} Possible Answers
             {answers}
 
             ### Task
@@ -244,30 +229,14 @@ class BayesianWithMultibranching(Task):
 
         # Query LLM
         output = await query_llm(prompt, self.questioner_session)
-
-        # Parse LLM
-        matches: list[tuple[str, str]] = re.findall(
-            r"\d+\. ([^|]+)\|([\d.;]+)", output, re.MULTILINE
-        )
-
-        raw_likelihoods = {
-            suspect: {
-                ans.strip(): max(min(float(p.strip()), 1 - 1e-10), 1e-10)
-                for ans, p in zip(answers, probs.split(";"))
+        likelihoods = parse_likelihoods(output)
+        return {
+            likelihood.hypothesis: {
+                ans: prob
+                for ans, prob in zip(answers, likelihood.likelihoods, strict=True)
             }
-            for suspect, probs in matches
+            for likelihood in likelihoods
         }
-
-        likelihoods = {
-            suspect: {
-                ans: prob / sum(per_suspect.values())
-                for ans, prob in per_suspect.items()
-            }
-            for suspect, per_suspect in raw_likelihoods.items()
-        }
-
-        assert len(likelihoods) > 0, "No likelihoods parsed!"
-        return likelihoods
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
@@ -278,7 +247,6 @@ class BayesianWithMultibranching(Task):
             None,
         )
         assert suspect is not None, f"Suspect '{suspect_name}' not found in case data"
-
         answers = [child.answer for child in current_node.children]
 
         prompt = dedent(f"""\
@@ -301,16 +269,7 @@ class BayesianWithMultibranching(Task):
         """)
 
         output = await query_llm(prompt, self.answerer_session)
-
-        llm_answer = output.strip().lower()
-        for child in current_node.children:
-            if child.answer.strip().lower() == llm_answer:
-                return child
-
-        raise RuntimeError(
-            f"No matching answer selected for '{current_node.question}'. "
-            f"Possible answers: {answers}, Given answer: {llm_answer}"
-        )
+        return parse_answer(output, current_node)
 
     def get_case_background(self) -> str:
         return dedent(f"""\
