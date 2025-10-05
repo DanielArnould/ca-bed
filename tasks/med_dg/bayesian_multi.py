@@ -49,9 +49,13 @@ class BayesianWithMultibranching(Task):
             You are an expert doctor. You are given the following patient self-report:
             {self.instance.self_report}
 
+            ### Possible diseases
+            {self.hypothesis_space}
+
             ### Task
-            - Assign a probability to each condition based on the self-report and your medical knowledge.
-            - Every condition in {self.hypothesis_space} must receive a probability, even if very small.
+            - Assign a probability to each possible disease based on the self-report and your medical knowledge.
+            - Every condition must receive a probability, even if very small.
+            - Use ONLY the conditions given
             - Probabilities must sum to 1.0 (±0.01 tolerance).
             - Express each probability as a decimal rounded to two places (e.g., 0.35).
             - Return only the formatted response; no explanations or commentary.

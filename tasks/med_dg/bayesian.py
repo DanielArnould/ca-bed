@@ -1,6 +1,8 @@
 from textwrap import dedent
 from typing import override
 
+from tenacity import retry, stop_after_attempt
+
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.med_dg.data import MED_DG_SET, MedDGInstance
@@ -41,9 +43,13 @@ class Bayesian(Task):
             You are an expert doctor. You are given the following patient self-report:
             {self.instance.self_report}
 
+            ### Possible diseases
+            {self.hypothesis_space}
+
             ### Task
-            - Assign a probability to each condition based on the self-report and your medical knowledge.
-            - Every condition in {self.hypothesis_space} must receive a probability, even if very small.
+            - Assign a probability to each possible disease based on the self-report and your medical knowledge.
+            - Every condition must receive a probability, even if very small.
+            - Use ONLY the conditions given
             - Probabilities must sum to 1.0 (±0.01 tolerance).
             - Express each probability as a decimal rounded to two places (e.g., 0.35).
             - Return only the formatted response; no explanations or commentary.
@@ -124,6 +130,7 @@ class Bayesian(Task):
         return {question.question: question.possible_answers for question in questions}
 
     @override
+    @retry(stop=stop_after_attempt(2))
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:

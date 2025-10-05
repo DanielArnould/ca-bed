@@ -48,9 +48,13 @@ class Baseline(Task):
             You are an expert doctor. You are given the following patient self-report:
             {self.instance.self_report}
 
+            ### Possible diseases
+            {self.hypothesis_space}
+
             ### Task
-            - Select one or more diseases from {self.hypothesis_space} you think the patient may have.
+            - Select one or more diseases you think the patient may have.
             - You must select at least one.
+            - Use ONLY the conditions given.
 
             ### Response Format
             One line per condition:
