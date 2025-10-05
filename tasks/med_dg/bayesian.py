@@ -1,52 +1,49 @@
-import re
 from textwrap import dedent
 from typing import override
 
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.task import Task
+from tasks.med_dg.data import MED_DG_SET, MedDGInstance
+from tasks.task import Task, parse_answer, parse_binary_questions, parse_probabilities
 
 
 class Bayesian(Task):
-    self_report: str
+    instance: MedDGInstance
 
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        task_answer: str,
+        instance: MedDGInstance,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
-        hypothesis_space: list[str],
-        self_report: str,
     ):
-        self.self_report = self_report
+        self.instance = instance
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=task_answer,
+            task_answer=instance.disease,
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=confidence_threshold,
-            hypothesis_space=hypothesis_space,
+            hypothesis_space=MED_DG_SET,
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.self_report=}"
+        return f"MedDG (Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.instance.self_report=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
-        prompt = (
-            dedent("""\
+        prompt = dedent(f"""\
             You are an expert doctor. You are given the following patient self-report:
-            {self_report}
+            {self.instance.self_report}
 
             ### Task
-            - Assign a prior probability to each condition based on the self-report and your medical knowledge.
-            - Every condition in {hypothesis_space} must receive a probability, even if very small.
+            - Assign a probability to each condition based on the self-report and your medical knowledge.
+            - Every condition in {self.hypothesis_space} must receive a probability, even if very small.
             - Probabilities must sum to 1.0 (±0.01 tolerance).
             - Express each probability as a decimal rounded to two places (e.g., 0.35).
             - Return only the formatted response; no explanations or commentary.
@@ -60,33 +57,12 @@ class Bayesian(Task):
             2. Common Cold|0.25  
             3. Pneumonia|0.30  
             4. Allergies|0.10   
-            """)
-            .format(
-                self_report=self.self_report,
-                hypothesis_space=self.hypothesis_space,
-            )
-            .strip()
-        )
+            """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
+        priors = parse_probabilities(output)
 
-        # Parse LLM
-        matches: list[tuple[str, str]] = re.findall(
-            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
-        )
-
-        raw_priors = {
-            disease: max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
-            for disease, prob in matches
-        }
-
-        priors = {
-            disease: prob / sum(raw_priors.values())
-            for disease, prob in raw_priors.items()
-        }
-
-        assert len(priors) > 0, "No priors parsed!"
-        return priors
+        return {prior.hypothesis: prior.probability for prior in priors}
 
     @override
     async def create_questions(
@@ -96,14 +72,12 @@ class Bayesian(Task):
 
         # Prologue
         parts.append(
-            dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            dedent(f"""\
+            You are an expert medical doctor, and your patient self-reports that: {self.instance.self_report}. 
     
-            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No', in order to find what disease this patient suffers from. 
+            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No' in order to find what disease this patient suffers from. 
             Use the ongoing conversation for context to avoid redundant questions. 
-            """)
-            .format(self_report=self.self_report)
-            .strip()
+            """).strip()
         )
 
         # Conversation History
@@ -111,12 +85,10 @@ class Bayesian(Task):
         if history:
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
-                dedent("""
+                dedent(f"""
                 These are the questions you've asked to the patient so far:
-                {history}
-                """)
-                .format(history=history_formatted)
-                .strip()
+                {history_formatted}
+                """).strip()
             )
 
         # Current belief state
@@ -125,138 +97,93 @@ class Bayesian(Task):
             for hypo, prob in current_node.belief_state.items()
         )
         parts.append(
-            dedent("""\
+            dedent(f"""\
             Based on our current beliefs, the patient is most likely suffering from one of the following diseases, which are listed along with their probabilities:
-            {belief}
-            """)
-            .format(belief=belief_state_formatted)
-            .strip()
+            {belief_state_formatted}
+            """).strip()
         )
 
         # Question generation
         parts.append(
-            dedent("""
-                Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            dedent(f"""
+                Your task is to generate {self.max_question_nodes} *excellent* yes/no questions to ask next.
+                The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
                 1. <Question 1>
                 2. <Question 2>
                 ...
                 n. <Question n>
-                """)
-            .format(num_questions=self.max_question_nodes)
-            .strip()
+                """).strip()
         )
 
         # Query LLM
-        prompt = "\n".join(parts)
+        prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
+        questions = parse_binary_questions(output)
 
-        # Parse LLM
-        question_texts: list[str] = re.findall(
-            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
-        )
-        questions = {
-            question_text.strip(): ["Yes", "No"] for question_text in question_texts
-        }
-        assert len(questions) > 0, "No questions generated!"
-        return questions
+        return {question.question: question.possible_answers for question in questions}
 
     @override
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
-        prompt = (
-            dedent("""\
-            You are an expert medical doctor estimating the likelihood of a "yes" answer to a diagnostic question for each candidate disease.
+        prompt = dedent(f"""\
+            You are an expert medical doctor diagnosing a patient.
+                        
+            ### Possible diseases
+            {hypotheses}
+                        
+            ### Question
+            "{question}"
 
-            ### Checklist (conceptual)
-            - Interpret the diagnostic question.  
-            - Apply relevant medical knowledge for each disease.  
-            - Estimate the probability a patient would answer "yes" if they have the disease.  
-            - Ensure outputs strictly match the required format.
-
-            ### Inputs
-            - Question: "{candidate_question}"  
-            - Diseases: {hypothesis_space}
-
-            ### Instructions
-            - For each disease, output the probability of a "yes" response.  
-            - Probabilities must be rounded to two decimals (e.g., 0.75).  
+            ### Task
+            For each disease, estimate the likelihood that the patient would answer 'Yes',
+            assuming they had that disease. Probabilities must:
+            - Be rounded to two decimals
 
             ### Response Format
             One line per disease:
             <sequence_number>. <Disease Name>|<probability>
+                
+            ### Example
+            1. Influenza|0.80
+            2. Common Cold|0.50
 
-            **Example:**
-            1. Influenza|0.80  
-            2. Common Cold|0.50  
-
-            Return only the formatted response; do not include commentary or explanations.
-
-            ### Output Schema
-            - Input:  
-                - candidate_question: str (e.g., "Do you have a cough?")  
-                - hypothesis_space: list[str] (e.g., ["Influenza", "Common Cold"])  
-
-            - Output:  
-                - For each disease: `<Disease Name>|<probability>`
-            """)
-            .format(
-                hypothesis_space=hypotheses,
-                candidate_question=question,
-            )
-            .strip()
-        )
+            Do not include commentary or explanations—return only the formatted response.
+            """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
 
-        # Parse LLM
-        matches: list[tuple[str, str]] = re.findall(
-            r"\d+\. ([^|]+)\|([\d.]+)", output, re.MULTILINE
-        )
+        # Query LLM
+        output = await query_llm(prompt, self.questioner_session)
+        probabilities = parse_probabilities(output)
 
         likelihoods = {
-            disease: {
-                "Yes": (
-                    adjusted_prob := max(min(float(prob.strip()), 1 - (1e-10)), 1e-10)
-                ),
-                "No": 1 - adjusted_prob,
+            probability.hypothesis: {
+                "Yes": probability.probability,
+                "No": 1 - probability.probability,
             }
-            for disease, prob in matches
+            for probability in probabilities
         }
 
-        assert len(likelihoods) > 0, "No likelihoods parsed!"
         return likelihoods
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        # Query LLM
-        prompt = (
-            dedent("""\
-            You are a patient experiencing {target_item}, and I am your doctor.  
-            I will ask you questions about your condition.  
+        prompt = dedent(f"""\
+            You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
+            I am your doctor and I will ask you questions about your condition.  
 
             ### Instructions
             - Answer truthfully based on your symptoms.  
             - Review the available options before responding.  
-            - Respond using only 'Yes' or 'No'. 
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question
-            {question}
-            """)
-            .format(target_item=self.task_answer, question=current_node.question)
-            .strip()
-        )
+            "{current_node.question}"
+            """).strip()
 
         output = await query_llm(prompt, self.answerer_session)
-
-        # Parse LLM
-        llm_answer = output.strip().lower()
-        for child in current_node.children:
-            if child.answer.strip().lower() == llm_answer:
-                return child
-
-        raise RuntimeError(
-            f"No matching answer selected for '{current_node.question}'. Possible answers: {list(child.answer for child in current_node.children)}, Given answer: {llm_answer}"
-        )
+        return parse_answer(output, current_node)
