@@ -105,7 +105,7 @@ class Direct(DirectPromptingTask):
         )
 
         # Targetting prompt
-        if len(history) >= 0.7 * self.max_conversation_depth:
+        if len(history) >= self.max_conversation_depth - 2:
             parts.append(
                 dedent("""
                 Now you should make predicitions instead of asking questions
@@ -119,10 +119,10 @@ class Direct(DirectPromptingTask):
         # Parse LLM
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
         prediction_match = re.search(
-            r"\[(PREDICTION|ANSWER)\]:\s*(.*)", output, re.IGNORECASE
+            r"\[(PREDICTION|ANSWER|PREDECTION)\]:\s*(.*)", output, re.IGNORECASE
         )
 
-        if question_match:
+        if question_match and self.parse_question(question_match.group(1).strip()):
             return Question(question_match.group(1).strip())
         elif prediction_match:
             return Prediction(prediction_match.group(2).strip())
@@ -172,7 +172,19 @@ class Direct(DirectPromptingTask):
 
     def parse_question(self, question: str) -> tuple[str, str]:
         suspect_match = re.match(r"\[(.*?)\]\s*(.*)", question)
-        assert suspect_match, f"Bad question: {question}"
+
+        # Fallback to finding first name in string
+        if not suspect_match:
+            for name in self.hypothesis_space:
+                if name in question:
+                    parts = question.split(name, 1)
+                    before, after = parts if len(parts) == 2 else ("", parts[0])
+                    suspect_name = name
+                    actual_question = (after or before).strip()
+                    return suspect_name, actual_question
+
+            assert False, f"Bad question: {question}"
+
         suspect_name, actual_question = suspect_match.groups()
         assert suspect_name in self.hypothesis_space, f"Unrecognised: {suspect_name}"
         return suspect_name, actual_question
