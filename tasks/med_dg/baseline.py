@@ -1,84 +1,70 @@
-import re
 from textwrap import dedent
 from typing import override
 
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.task import Task
+from tasks.med_dg.data import MED_DG_SET, MedDGInstance
+from tasks.task import (
+    Task,
+    parse_answer,
+    parse_binary_questions,
+    parse_categorical_likelihoods,
+    parse_uniform_probabilities,
+)
 
 
 class Baseline(Task):
-    self_report: str
+    instance: MedDGInstance
 
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        task_answer: str,
+        instance: MedDGInstance,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
-        hypothesis_space: list[str],
-        self_report: str,
     ):
-        self.self_report = self_report
+        self.instance = instance
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=task_answer,
+            task_answer=instance.disease,
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=1.0,
-            hypothesis_space=hypothesis_space,
+            hypothesis_space=MED_DG_SET,
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
+        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.instance.self_report=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
-        prompt = (
-            dedent("""\
+        prompt = dedent(f"""\
             You are an expert doctor. You are given the following patient self-report:
-            {self_report}
+            {self.instance.self_report}
 
             ### Task
-            - Select one or more conditions from {hypothesis_space} that the patient may have.  
-            - You must select at least one.  
-            - Return only the formatted response; no explanations or commentary.  
+            - Select one or more diseases from {self.hypothesis_space} you think the patient may have.
+            - You must select at least one.
 
             ### Response Format
-            One line per selected condition:
+            One line per condition:
             <number>. <Condition Name>
 
             ### Example
-            1. Influenza  
-            2. Common Cold  
-            3. Pneumonia  
-            4. Allergies 
-            """)
-            .format(
-                self_report=self.self_report,
-                hypothesis_space=self.hypothesis_space,
-            )
-            .strip()
-        )
+            1. Influenza
+            2. Common Cold 
+            3. Pneumonia 
+            4. Allergies   
+            """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
+        priors = parse_uniform_probabilities(output)
 
-        # Parse LLM
-        matches: list[str] = re.findall(
-            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
-        )
-
-        selected_conditions = [disease.strip() for disease in matches]
-        priors = {
-            disease: 1 / len(selected_conditions) for disease in selected_conditions
-        }
-
-        assert len(priors) > 0, "No priors parsed!"
-        return priors
+        return {prior.hypothesis: prior.probability for prior in priors}
 
     @override
     async def create_questions(
@@ -88,14 +74,12 @@ class Baseline(Task):
 
         # Prologue
         parts.append(
-            dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            dedent(f"""\
+            You are an expert medical doctor, and your patient self-reports that: {self.instance.self_report}. 
     
-            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No', in order to find what disease this patient suffers from. 
+            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No' in order to find what disease this patient suffers from. 
             Use the ongoing conversation for context to avoid redundant questions. 
-            """)
-            .format(self_report=self.self_report)
-            .strip()
+            """).strip()
         )
 
         # Conversation History
@@ -103,12 +87,10 @@ class Baseline(Task):
         if history:
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
-                dedent("""
+                dedent(f"""
                 These are the questions you've asked to the patient so far:
-                {history}
-                """)
-                .format(history=history_formatted)
-                .strip()
+                {history_formatted}
+                """).strip()
             )
 
         # Current belief state
@@ -116,147 +98,99 @@ class Baseline(Task):
             f"- {hypo}" for hypo in current_node.belief_state.keys()
         )
         parts.append(
-            dedent("""\
+            dedent(f"""\
             Based on our current beliefs, the patient is most likely suffering from one of the following diseases:
-            {belief}
-            """)
-            .format(belief=belief_state_formatted)
-            .strip()
+            {belief_state_formatted}
+            """).strip()
         )
 
         # Question generation
         parts.append(
-            dedent("""
-                Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            dedent(f"""
+                Your task is to generate {self.max_question_nodes} *excellent* yes/no questions to ask next.
+                The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
                 1. <Question 1>
                 2. <Question 2>
                 ...
                 n. <Question n>
-                """)
-            .format(num_questions=self.max_question_nodes)
-            .strip()
+                """).strip()
         )
 
         # Query LLM
-        prompt = "\n".join(parts)
+        prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
+        questions = parse_binary_questions(output)
 
-        # Parse LLM
-        question_texts: list[str] = re.findall(
-            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
-        )
-        questions = {
-            question_text.strip(): ["Yes", "No"] for question_text in question_texts
-        }
-        assert len(questions) > 0, "No questions generated!"
-        return questions
+        return {question.question: question.possible_answers for question in questions}
 
     @override
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
-        prompt = (
-            dedent("""\
-            You are an expert medical doctor classifying diseases based on a diagnostic yes/no question.
+        prompt = dedent(f"""\
+            You are an expert medical doctor diagnosing a patient.
+                        
+            ### Possible diseases
+            {hypotheses}
+                        
+            ### Question
+            "{question}"
 
-            ### Checklist (conceptual)
-            - Interpret the diagnostic question.  
-            - Apply relevant medical knowledge for each disease.  
-            - Decide whether a patient with the disease would likely answer "YES" or "NO".  
-            - Ensure every disease is classified exactly once (no omissions, no duplicates).  
-            - Ensure outputs strictly match the required format.  
+            ### {len(answers)} Possible Answers
+            {answers}
 
-            ### Inputs
-            - Question: "{candidate_question}"  
-            - Diseases: {hypothesis_space}  
-
-            ### Instructions
-            - Place each disease under "YES" if the expected answer is yes when the patient has that disease.  
-            - Place each disease under "NO" otherwise.  
-            - Use the disease names exactly as given.  
+            ### Task
+            - Interpret the question and possible answers.  
+            - For each disease, assume the patient has it and decide whether they would most likely say 'Yes' or 'No'.  
+            - Assign each disease to exactly one of 'Yes' or 'No' (no omissions, no duplicates).  
+            - Use the disease names exactly as given.
+            - Display the answers exactly in the order as given.
 
             ### Response Format
-            
-            YES: disease_1, disease_2, ...
-            Count of YES: <integer>
-            NO: disease_3, disease_4, ...
-            Count of NO: <integer>
-                   
-            **Example:**
-            
-            YES: Influenza, Common Cold, Pneumonia
-            Count of YES: 3
-            NO: Allergies
-            Count of NO: 1
 
-            Return only the formatted response; do not include commentary or explanations.
+            Yes: Condition_1, Condition_2, ...
+            Count of 'Yes': <integer>
+            No: Condition_3, Condition_4, ...
+            Count of 'No': <integer>
 
-            ### Output Schema
-            - Input:  
-                - question: str (e.g., "Do you have a cough?")  
-                - items_str: list[str] (e.g., ["Influenza", "Common Cold", "Pneumonia", "Allergies"])  
+            ### Example
 
-            - Output:  
-                - YES: list of diseases (comma-separated)  
-                - Count of YES: integer  
-                - NO: list of diseases (comma-separated)  
-                - Count of NO: integer  
-            """)
-            .format(
-                hypothesis_space=hypotheses,
-                candidate_question=question,
-            )
-            .strip()
-        )
+            Yes: Influenza, Pneumonia
+            Count of 'Yes': 2
+            No: COVID-19
+            Count of 'No': 1
 
+            Do not include commentary or explanations. Return only the formatted response.
+            """).strip()
+
+        # Query LLM
         output = await query_llm(prompt, self.questioner_session)
-
-        # Parse LLM
-        # grab text after YES: until "Count"
-        m_yes = re.search(r"YES:\s*(.*?)\s*Count", output, re.DOTALL)
-        m_no = re.search(r"NO:\s*(.*?)\s*Count", output, re.DOTALL)
-
-        yes_set = set([s.strip() for s in m_yes.group(1).split(",")] if m_yes else [])
-        no_set = set([s.strip() for s in m_no.group(1).split(",")] if m_no else [])
-        hs = yes_set.union(no_set)
-
+        likelihoods = parse_categorical_likelihoods(output, possible_answers=answers)
         return {
-            h: {"Yes": 1 - (1e-10), "No": 1e-10}
-            if h in yes_set
-            else {"Yes": 1e-10, "No": 1 - (1e-10)}
-            for h in hs
+            likelihood.hypothesis: {
+                ans: prob
+                for ans, prob in zip(answers, likelihood.likelihoods, strict=True)
+            }
+            for likelihood in likelihoods
         }
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        # Query LLM
-        prompt = (
-            dedent("""\
-            You are a patient experiencing {target_item}, and I am your doctor.  
-            I will ask you questions about your condition.  
+        prompt = dedent(f"""\
+            You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
+            I am your doctor and I will ask you questions about your condition.  
 
             ### Instructions
             - Answer truthfully based on your symptoms.  
             - Review the available options before responding.  
-            - Respond using only 'Yes' or 'No'. 
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question
-            {question}
-            """)
-            .format(target_item=self.task_answer, question=current_node.question)
-            .strip()
-        )
+            "{current_node.question}"
+            """).strip()
 
         output = await query_llm(prompt, self.answerer_session)
-
-        # Parse LLM
-        llm_answer = output.strip().lower()
-        for child in current_node.children:
-            if child.answer.strip().lower() == llm_answer:
-                return child
-
-        raise RuntimeError(
-            f"No matching answer selected for '{current_node.question}'. Possible answers: {list(child.answer for child in current_node.children)}, Given answer: {llm_answer}"
-        )
+        return parse_answer(output, current_node)
