@@ -2,94 +2,109 @@ import re
 from textwrap import dedent
 from typing import override
 
-from node import EvidenceNode
-from tasks.direct_prompting_task import DirectPromptingTask, NaiveQuestionerResponse
+from models import LLMRequestSession, query_llm
+from node import EvidenceNode, get_conversation_history
+from tasks.direct_prompting_task import (
+    DirectPromptingTask,
+    Prediction,
+    Question,
+)
 
 
 class Direct(DirectPromptingTask):
-    self_report: str
-
     def __init__(
         self,
+        questioner_session: LLMRequestSession,
+        answerer_session: LLMRequestSession,
         task_answer: str,
         max_conversation_depth: int,
-        hypothesis_space: list[str]
+        hypothesis_space: list[str],
     ):
-        self.task_answer = task_answer
-        self.max_conversation_depth = max_conversation_depth
-        self.hypothesis_space = hypothesis_space
+        super().__init__(
+            questioner_session=questioner_session,
+            answerer_session=answerer_session,
+            task_answer=task_answer,
+            max_conversation_depth=max_conversation_depth,
+            hypothesis_space=hypothesis_space,
+        )
 
     def __str__(self) -> str:
-        return f"Twenty Questions (Bayesian): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=}"
+        return f"Twenty Questions (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=}"
 
     @override
-    def get_questioner_prompt(self, current_node: EvidenceNode) -> str:
-        history: list[tuple[str, str]] = []
-        while current_node.parent:
-            history.append((current_node.parent.question, current_node.answer))
-            current_node = current_node.parent.parent
+    async def query_questioner(
+        self, current_node: EvidenceNode
+    ) -> Question | Prediction:
+        parts = []
 
-        history.reverse()
-        hypothesis = "\n".join(f"- {hypo}" for hypo in self.hypothesis_space)
-
-        base_prompt = dedent("""\
-            You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X. X is possibly one of the following:
-            {hypothesis}
-            You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
+        # Prologue
+        possible_items = "\n".join(f"- {h}" for h in self.hypothesis_space)
+        parts.append(
+            dedent(f"""\
+            You are an expert player of the 20 Questions game. Your goal is to guess a secret entity, X. I will be impersonating the secret entity, X.
+            The secret entity could be one of the following:
+            {possible_items}
+            
+            You can either ask questions that starts with 'Is X' and can only be answered by 'Yes' or 'No', or you can make a prediction of what X is.
             
             If you are confident enough to make a prediction, output:
-            [PREDICTION]: <This should ONLY be the exact name of the object from the list of possible objects>
+            [PREDICTION]: <This should ONLY be the exact name of the entity from the list of possible entities>
 
             Otherwise, if you need more information, output:
-            [QUESTION]: <Your question here>
-        """)
+            [QUESTION]: <Your yes/no question here>
+            """)
+            .format(possible_items=possible_items)
+            .strip()
+        )
 
-        if not history:
-            return base_prompt.format(
-                hypothesis=hypothesis
-            ).strip()
-
-        conversation_history = "\n".join(f"Q: {q}\nA: {a}" for q, a in history)
-        return (
-            base_prompt.format(
-                hypothesis=hypothesis
+        # Conversation history
+        history = get_conversation_history(current_node)
+        if history:
+            history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
+            parts.append(
+                dedent(f"""\
+                These are the questions you've already asked so far:
+                {history_formatted}
+                """).strip()
             )
-            + "\n\nHere is the conversation history so far:\n"
-            + conversation_history
-            + (
-                "\n\nNow you should make predictions instead of asking questions\n"
-                if len(history) >= 14
-                else ""
-            )
-        ).strip()
 
-    @override
-    def parse_questioner_output(
-        self, output: str
-    ) -> tuple[NaiveQuestionerResponse, str]:
+        # Targetting prompt
+        if len(history) >= 0.7 * self.max_conversation_depth:
+            parts.append(
+                dedent("""
+                Now you should make predicitions instead of asking questions
+                """).strip()
+            )
+
+        # Query LLM
+        prompt = "\n\n".join(parts)
+        output = await query_llm(prompt, self.questioner_session)
+
+        # Parse LLM
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
         prediction_match = re.search(
             r"\[(PREDICTION|ANSWER)\]:\s*(.*)", output, re.IGNORECASE
         )
 
         if question_match:
-            return NaiveQuestionerResponse.QUESTION, question_match.group(1).strip()
+            return Question(question_match.group(1).strip())
         elif prediction_match:
-            prediction = prediction_match.group(2).strip()
-            return NaiveQuestionerResponse.PREDICTION, prediction
+            return Prediction(prediction_match.group(2).strip())
         else:
             raise RuntimeError(f"Response does not match expected structure, {output}")
 
     @override
-    def get_answerer_prompt(self, question: str) -> str:
-        return (
-            dedent("""
-            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
+    async def query_answerer(self, question: str) -> str:
+        prompt = dedent(f"""\
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {self.task_answer}.
             I will ask up to 20 questions and you should answer each one truthfully based on being X.
-            DO NOT REVEAL/MENTION WHAT X IS UNTIL I ASK "Is X ..."
-            Let us begin. Here is my question:
-            {question}
-            """)
-            .format(target_item=self.task_answer, question=question)
-            .strip()
-        )
+
+            ### Instructions
+            - Answer truthfully based on what X is.  
+            - Limit your response to 1 sentence only.
+
+            ### Question
+            "{question}"
+            """).strip()
+
+        return await query_llm(prompt, self.answerer_session)

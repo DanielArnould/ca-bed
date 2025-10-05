@@ -1,94 +1,101 @@
 import asyncio
-from datetime import datetime
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
-from direct_prompting_method import DirectPromptingMethod
+import direct_prompting_method
 from history import (
-    load_question_clustering,
     save_question_clustering,
     serialise_run_record,
 )
-from method import Method
-from models import Model
+import method
+from models import LLMRequestSession
 from question_clustering import QuestionClustering
 from tasks.direct_prompting_task import DirectPromptingTask
-from tasks.twenty_questions.bayesian import Bayesian
-from tasks.twenty_questions.baseline import Baseline
-from tasks.movie_lens.baseline import Baseline as MovieLensBaseline
-from tasks.movie_lens.bayesian import Bayesian as MovieLensBayesian
-from tasks.movie_lens.data import load_balanced_dataset
-from tasks.movie_lens.common import persona_record_to_context
+from tasks.med_dg.baseline import Baseline
+from tasks.med_dg.baseline_multi import BaselineWithMultibranching
+from tasks.med_dg.bayesian import Bayesian
+from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
+from tasks.med_dg.data import load_balanced_data
+from tasks.med_dg.direct import Direct
 from tasks.task import Task
-from tasks.twenty_questions.data import (
-    BIG_BENCH_CONCEPT,
-    Animals,
-    Food,
-    Objects,
-    Places,
-)
 
-LOGGER = logging.getLogger("Main")
+logger = logging.getLogger("Main")
 
 
-def setup_logging(output_dir: Path) -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s][%(levelname)s][%(name)s]: %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(output_dir / "logs.log", encoding="utf-8"),
-        ],
-        force=True,
+async def main(output_dir: Path) -> None:
+    # =============== CONFIG ===============
+    questioner_model_key = "gpt_oss_20b"
+    answerer_model_key = "gpt_oss_20b"
+    sharpness_constant = 0.4
+    min_probability = 0.001
+    max_concurrent = 1
+    clustering_threshold = 0.97
+    shared_question_cluster = True
+    dataset = load_balanced_data(0.05)
+
+    tasks = [
+        Baseline(
+            questioner_session=LLMRequestSession(questioner_model_key),
+            answerer_session=LLMRequestSession(answerer_model_key),
+            instance=item,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
+            max_conversation_depth=5,
+            # confidence_threshold=0.7,
+        )
+        for item in dataset[1:2]
+    ]
+
+    # =============== EXECUTION ===============
+    logger.info(f"Questioner: {questioner_model_key} Answerer: {answerer_model_key}")
+    shared_clustering = (
+        QuestionClustering(clustering_threshold) if shared_question_cluster else None
     )
 
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-async def run_single_direct_prompting_task(
-    idx: int,
-    task: DirectPromptingTask,
-    output_dir: Path,
-    semaphore: asyncio.Semaphore,
-    benchmark_model: Model,
-    method_model: Model,
-) -> None:
-    async with semaphore:
-        method = DirectPromptingMethod(
-            benchmark_model,
-            method_model,
-            task,
-        )
-        history = await method.run()
+    await asyncio.gather(
+        *[
+            run_tree_based_task(
+                idx=i,
+                task=task,
+                output_dir=output_dir,
+                semaphore=semaphore,
+                sharpness_constant=sharpness_constant,
+                min_probability=min_probability,
+                question_clustering=(
+                    shared_clustering
+                    if shared_question_cluster
+                    else QuestionClustering(clustering_threshold)
+                ),  # type: ignore
+            )
+            # run_direct_prompting_task(
+            #     idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            # )
+            for i, task in enumerate(tasks)
+        ]
+    )
 
-        LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
-
-        run_history_path = output_dir / f"{idx}_run.json"
-        with run_history_path.open("w") as f:
-            json.dump(serialise_run_record(history), f)
-
-        LOGGER.info(f"[{idx}] Run saved to {output_dir}")
-        LOGGER.info(
-            f"[{idx}] Total input tokens: {history.total_input_tokens} Total output tokens: {history.total_output_tokens}"
-        )
+    logger.info("All runs completed successfully!")
 
 
-async def run_single_task(
+async def run_tree_based_task(
     idx: int,
     task: Task,
     output_dir: Path,
     semaphore: asyncio.Semaphore,
-    benchmark_model: Model,
-    method_model: Model,
     sharpness_constant: float,
+    min_probability: float,
     question_clustering: QuestionClustering,
 ) -> None:
     async with semaphore:
-        method = Method(
-            benchmark_model, method_model, sharpness_constant, task, question_clustering
+        run_record = await method.run_task(
+            task, question_clustering, sharpness_constant, min_probability
         )
-        history = await method.run()
 
-        LOGGER.info(f"[{idx}] Completed run, saving output to {output_dir}")
+        logger.info(f"[{idx}] Completed run, saving output to {output_dir}")
         question_clustering_path_json = output_dir / f"{idx}_cluster.json"
         question_clustering_path_voyager = output_dir / f"{idx}_cluster.voy"
 
@@ -99,85 +106,47 @@ async def run_single_task(
         )
 
         run_history_path = output_dir / f"{idx}_run.json"
-        with run_history_path.open("w") as f:
-            json.dump(serialise_run_record(history), f)
+        with run_history_path.open("w", encoding="utf-8") as f:
+            json.dump(serialise_run_record(run_record), f)
 
-        LOGGER.info(f"[{idx}] Run saved to {output_dir}")
-        LOGGER.info(
-            f"[{idx}] Total input tokens: {history.total_input_tokens} Total output tokens: {history.total_output_tokens}"
+        logger.info(f"[{idx}] Run saved to {output_dir}")
+        logger.info(
+            f"[{idx}] Total input tokens: {task.questioner_session.total_input_tokens + task.answerer_session.total_input_tokens}"
+            f" Total output tokens: {run_record.questioner_session.total_output_tokens + run_record.answerer_session.total_output_tokens}"
         )
 
 
-async def main() -> None:
-    # =============== CONFIG ===============
-    benchmark_model = Model.GPT_OSS_20B
-    method_model = Model.DEEPSEEK_CHAT_TOGETHER_AI
-    sharpness_constant = 0.4
-    max_concurrent = 1
-    clustering_threshold = 0.97
-    dataset, movie_set = load_balanced_dataset()
+async def run_direct_prompting_task(
+    idx: int,
+    task: DirectPromptingTask,
+    output_dir: Path,
+    semaphore: asyncio.Semaphore,
+) -> None:
+    async with semaphore:
+        run_record = await direct_prompting_method.run_task(task)
+        logger.info(f"[{idx}] Completed run, saving output to {output_dir}")
 
-    tasks = [
-        MovieLensBayesian(
-            max_question_nodes=2,
-            max_conversation_depth=5,
-            max_lookahead_depth=3,
-            persona=persona_record_to_context(
-                item.persona, item.preferred_movies, item.disliked_movies),
-            candidate_movies=movie_set,
-            confidence_threshold=1
+        run_history_path = output_dir / f"{idx}_run.json"
+        with run_history_path.open("w", encoding="utf-8") as f:
+            json.dump(serialise_run_record(run_record), f)
+
+        logger.info(f"[{idx}] Run saved to {output_dir}")
+        logger.info(
+            f"[{idx}] Total input tokens: {task.questioner_session.total_input_tokens + task.answerer_session.total_input_tokens}"
+            f" Total output tokens: {run_record.questioner_session.total_output_tokens + run_record.answerer_session.total_output_tokens}"
         )
-        for item in dataset[0:1]
-    ]
-
-    # =============== EXECUTION ===============
-    output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    setup_logging(output_dir)
-
-    LOGGER.info(
-        f"Benchmarker: {benchmark_model.name} Method: {method_model.name}")
-    question_clustering = QuestionClustering(clustering_threshold)
-
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    await asyncio.gather(
-        *[
-            run_single_task(
-                i,
-                task,
-                output_dir,
-                semaphore,
-                benchmark_model=benchmark_model,
-                method_model=method_model,
-                sharpness_constant=sharpness_constant,
-                question_clustering=question_clustering,
-            )
-            for i, task in enumerate(tasks)
-        ]
-    )
-
-    save_question_clustering(
-        question_clustering,
-        output_dir / "final_cluster.json",
-        output_dir / "final_cluster.voy",
-    )
-    LOGGER.info("All runs completed successfully!")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    # dataset, movie_set = load_balanced_dataset()
-    # item = dataset[0]
-    # task = MovieLensBaseline(
-    #     max_question_nodes=2,
-    #     max_conversation_depth=5,
-    #     max_lookahead_depth=3,
-    #     persona=persona_record_to_context(
-    #         item.persona, item.preferred_movies, item.disliked_movies),
-    #     candidate_movies=movie_set
-    # )
-
-    # # print(len(movie_set))
-
-    # print(task._persona_block)
+    output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s][%(levelname)s][%(name)s]: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(output_dir / "logs.log", encoding="utf-8"),
+        ],
+        force=True,
+    )
+    asyncio.run(main(output_dir))

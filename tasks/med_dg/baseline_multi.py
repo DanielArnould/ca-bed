@@ -9,13 +9,13 @@ from tasks.med_dg.data import MED_DG_SET, MedDGInstance
 from tasks.task import (
     Task,
     parse_answer,
-    parse_binary_questions,
     parse_categorical_likelihoods,
+    parse_questions,
     parse_uniform_probabilities,
 )
 
 
-class Baseline(Task):
+class BaselineWithMultibranching(Task):
     instance: MedDGInstance
 
     def __init__(
@@ -40,7 +40,7 @@ class Baseline(Task):
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.instance.self_report=}"
+        return f"MedDG (Non-Bayesian + Multibranching): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.instance.self_report=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
@@ -83,7 +83,7 @@ class Baseline(Task):
             dedent(f"""\
             You are an expert medical doctor, and your patient self-reports that: {self.instance.self_report}. 
     
-            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No' in order to find what disease this patient suffers from. 
+            You should ask your patient questions in English about symptoms in order to find what disease this patient suffers from. 
             Use the ongoing conversation for context to avoid redundant questions. 
             """).strip()
         )
@@ -113,20 +113,20 @@ class Baseline(Task):
         # Question generation
         parts.append(
             dedent(f"""
-                Your task is to generate {self.max_question_nodes} *excellent* yes/no questions to ask next.
+                Your task is to generate {self.max_question_nodes} *excellent* questions to ask next, along with a list of possible answers.
                 The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
-                1. <Question 1>
-                2. <Question 2>
+                1. <Question 1>|Answer1;Answer2;Answer3
+                2. <Question 2>|Answer1;Answer2
                 ...
-                n. <Question n>
+                n. <Question n>|Answer1;Answer2;Answer3;...;AnswerK
                 """).strip()
         )
 
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
-        questions = parse_binary_questions(output)
+        questions = parse_questions(output)
 
         return {question.question: question.possible_answers for question in questions}
 
@@ -150,17 +150,17 @@ class Baseline(Task):
 
             ### Task
             - Interpret the question and possible answers.  
-            - For each disease, assume the patient has it and decide whether they would most likely say 'Yes' or 'No'.  
-            - Assign each disease to exactly one of 'Yes' or 'No' (no omissions, no duplicates).  
+            - For each disease, assume the patient has it and decide which answer they would most likely give.  
+            - Assign each disease to exactly one of the provided answers (no omissions, no duplicates).  
             - Use the disease names exactly as given.
             - Display the answers exactly in the order as given.
 
             ### Response Format
 
-            Yes: Condition_1, Condition_2, ...
-            Count of 'Yes': <integer>
-            No: Condition_3, Condition_4, ...
-            Count of 'No': <integer>
+            <ANSWER1>: Condition_1, Condition_2, ...
+            Count of <ANSWER1>: <integer>
+            <ANSWER2>: Condition_3, Condition_4, ...
+            Count of <ANSWER2>: <integer>
 
             ### Example
 
@@ -185,6 +185,7 @@ class Baseline(Task):
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
+        answers = [child.answer for child in current_node.children]
         prompt = dedent(f"""\
             You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
             I am your doctor and I will ask you questions about your condition.  
@@ -192,7 +193,7 @@ class Baseline(Task):
             ### Instructions
             - Answer truthfully based on your symptoms.  
             - Review the available options before responding.  
-            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - You must ONLY respond with one of the following option, matching it EXACTLY: {answers}
             - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question

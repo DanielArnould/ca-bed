@@ -2,38 +2,56 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 
-from sentence_transformers import SentenceTransformer
 from voyager import Index, Space
 
-LOGGER = logging.getLogger("Question Clustering")
+from globals import SENTENCE_TRANSFORMER
+
+logger = logging.getLogger("Question Clustering")
 
 
 @dataclass
 class Cluster:
     questions: dict[str, int]
-    # Answer -> hypothesis -> likelihood
-    likelihoods: dict[str, dict[str, float]] | None
+    # hypothesis -> answer -> likelihood
+    likelihoods: dict[str, dict[str, float]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=lambda: asyncio.Lock())
+
+    def get_hypotheses(self) -> list[str]:
+        return list(self.likelihoods.keys())
+
+    def get_answers(self) -> list[str]:
+        if not self.likelihoods:
+            return []
+
+        it = iter(self.likelihoods.values())
+        first_keys = set(next(it).keys())
+
+        assert all(set(answers.keys()) == first_keys for answers in it), (
+            "Hypotheses in cluster do not have consistent answers!"
+        )
+
+        return list(first_keys)
+
+    def get_likelihoods_for_answer(self, answer: str) -> dict[str, float]:
+        return {
+            hypo: hypo_likelihoods[answer]
+            for hypo, hypo_likelihoods in self.likelihoods.items()
+        }
 
 
 class QuestionClustering:
     index: Index
     clusters: dict[str, Cluster]
     threshold: float
-    model: SentenceTransformer
 
     def __init__(self, threshold: float):
-        LOGGER.info(f"Setting up question cluster with threshold '{threshold}'")
-        self.model = SentenceTransformer(
-            "quora-distilbert-multilingual",
-            backend="onnx",
-        )
+        logger.info(f"Setting up question cluster with threshold '{threshold}'")
         self.index = Index(Space.Cosine, num_dimensions=768)
         self.threshold = threshold
         self.clusters = {}
 
     def get_cluster(self, question: str) -> Cluster:
-        embedding = self.model.encode(
+        embedding = SENTENCE_TRANSFORMER.encode(
             question, convert_to_numpy=True, normalize_embeddings=False
         )
         neighbours, distances = (
@@ -42,7 +60,7 @@ class QuestionClustering:
 
         if len(neighbours) > 0 and 1 - distances[0] >= self.threshold:
             best_cluster = self.clusters[str(neighbours[0])]
-            LOGGER.info(
+            logger.info(
                 f"Cluster found for '{question}', with similarity {1 - distances[0]}!"
             )
             best_cluster.questions[question] = (
@@ -50,11 +68,10 @@ class QuestionClustering:
             )
             return best_cluster
 
-        LOGGER.info(f"Cluster not found for '{question}'. Creating new cluster...")
+        logger.info(f"Cluster not found for '{question}'. Creating new cluster...")
         idx = str(self.index.add_item(embedding))
         new_cluster = Cluster(
             {question: 1},
-            None,
         )
         self.clusters[idx] = new_cluster
         return new_cluster

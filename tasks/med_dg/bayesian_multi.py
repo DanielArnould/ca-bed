@@ -9,13 +9,13 @@ from tasks.med_dg.data import MED_DG_SET, MedDGInstance
 from tasks.task import (
     Task,
     parse_answer,
-    parse_binary_questions,
-    parse_categorical_likelihoods,
-    parse_uniform_probabilities,
+    parse_likelihoods,
+    parse_probabilities,
+    parse_questions,
 )
 
 
-class Baseline(Task):
+class BayesianWithMultibranching(Task):
     instance: MedDGInstance
 
     def __init__(
@@ -26,6 +26,7 @@ class Baseline(Task):
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
+        confidence_threshold: float,
     ):
         self.instance = instance
         super().__init__(
@@ -35,12 +36,12 @@ class Baseline(Task):
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
-            confidence_threshold=1.0,
+            confidence_threshold=confidence_threshold,
             hypothesis_space=MED_DG_SET,
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.instance.self_report=}"
+        return f"MedDG (Bayesian + Multibranching): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.confidence_threshold=} {self.hypothesis_space=} {self.instance.self_report=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
@@ -52,23 +53,26 @@ class Baseline(Task):
             {self.hypothesis_space}
 
             ### Task
-            - Select one or more diseases you think the patient may have.
-            - You must select at least one.
-            - Use ONLY the conditions given.
+            - Assign a probability to each possible disease based on the self-report and your medical knowledge.
+            - Every condition must receive a probability, even if very small.
+            - Use ONLY the conditions given
+            - Probabilities must sum to 1.0 (±0.01 tolerance).
+            - Express each probability as a decimal rounded to two places (e.g., 0.35).
+            - Return only the formatted response; no explanations or commentary.
 
             ### Response Format
             One line per condition:
-            <number>. <Condition Name>
+            <number>. <Condition Name>|<probability>
 
             ### Example
-            1. Influenza
-            2. Common Cold 
-            3. Pneumonia 
-            4. Allergies   
+            1. Influenza|0.35  
+            2. Common Cold|0.25  
+            3. Pneumonia|0.30  
+            4. Allergies|0.10   
             """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
-        priors = parse_uniform_probabilities(output)
+        priors = parse_probabilities(output)
 
         return {prior.hypothesis: prior.probability for prior in priors}
 
@@ -83,7 +87,7 @@ class Baseline(Task):
             dedent(f"""\
             You are an expert medical doctor, and your patient self-reports that: {self.instance.self_report}. 
     
-            You should ask your patient questions in English about symptoms which can only be answered by 'Yes' or 'No' in order to find what disease this patient suffers from. 
+            You should ask your patient questions in English about symptoms in order to find what disease this patient suffers from. 
             Use the ongoing conversation for context to avoid redundant questions. 
             """).strip()
         )
@@ -101,11 +105,12 @@ class Baseline(Task):
 
         # Current belief state
         belief_state_formatted = "\n".join(
-            f"- {hypo}" for hypo in current_node.belief_state.keys()
+            f"- Disease: {hypo}; Probability: {prob}"
+            for hypo, prob in current_node.belief_state.items()
         )
         parts.append(
             dedent(f"""\
-            Based on our current beliefs, the patient is most likely suffering from one of the following diseases:
+            Based on our current beliefs, the patient is most likely suffering from one of the following diseases, which are listed along with their probabilities:
             {belief_state_formatted}
             """).strip()
         )
@@ -113,20 +118,20 @@ class Baseline(Task):
         # Question generation
         parts.append(
             dedent(f"""
-                Your task is to generate {self.max_question_nodes} *excellent* yes/no questions to ask next.
+                Your task is to generate {self.max_question_nodes} *excellent* questions to ask next, along with a list of possible answers.
                 The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
-                1. <Question 1>
-                2. <Question 2>
+                1. <Question 1>|Answer1;Answer2;Answer3
+                2. <Question 2>|Answer1;Answer2
                 ...
-                n. <Question n>
+                n. <Question n>|Answer1;Answer2;Answer3;...;AnswerK
                 """).strip()
         )
 
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
-        questions = parse_binary_questions(output)
+        questions = parse_questions(output)
 
         return {question.question: question.possible_answers for question in questions}
 
@@ -149,32 +154,31 @@ class Baseline(Task):
             {answers}
 
             ### Task
-            - Interpret the question and possible answers.  
-            - For each disease, assume the patient has it and decide whether they would most likely say 'Yes' or 'No'.  
-            - Assign each disease to exactly one of 'Yes' or 'No' (no omissions, no duplicates).  
-            - Use the disease names exactly as given.
-            - Display the answers exactly in the order as given.
+            For each disease, estimate the likelihood that the patient would give each answer,
+            assuming they had that disease. Probabilities must:
+            - Align with the provided answers in order
+            - Sum to 1.0 (±0.01)
+            - Be rounded to two decimals
+
+            If verification fails, return only one of:
+            - "ERROR: Number of probabilities does not match the number of possible answers."
+            - "ERROR: Probabilities do not sum to 1.0."
 
             ### Response Format
-
-            Yes: Condition_1, Condition_2, ...
-            Count of 'Yes': <integer>
-            No: Condition_3, Condition_4, ...
-            Count of 'No': <integer>
-
+            One line per disease:
+            <sequence_number>. <Disease Name>|<prob_answer_1>;<prob_answer_2>;...;<prob_answer_n>
+                
             ### Example
 
-            Yes: Influenza, Pneumonia
-            Count of 'Yes': 2
-            No: COVID-19
-            Count of 'No': 1
+            1. Influenza|0.80;0.10;0.10
+            2. Common Cold|0.50;0.40;0.10
 
-            Do not include commentary or explanations. Return only the formatted response.
+            Do not include commentary or explanations—return only the formatted response.
             """).strip()
 
         # Query LLM
         output = await query_llm(prompt, self.questioner_session)
-        likelihoods = parse_categorical_likelihoods(output, possible_answers=answers)
+        likelihoods = parse_likelihoods(output)
         return {
             likelihood.hypothesis: {
                 ans: prob
@@ -185,6 +189,7 @@ class Baseline(Task):
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
+        answers = [child.answer for child in current_node.children]
         prompt = dedent(f"""\
             You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
             I am your doctor and I will ask you questions about your condition.  
@@ -192,7 +197,7 @@ class Baseline(Task):
             ### Instructions
             - Answer truthfully based on your symptoms.  
             - Review the available options before responding.  
-            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - You must ONLY respond with one of the following option, matching it EXACTLY: {answers}
             - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question
