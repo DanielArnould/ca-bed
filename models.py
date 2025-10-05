@@ -46,7 +46,7 @@ llm_models: dict[str, dict] = {
     "deepseek_chat": {
         "client": _deepseek_client,
         "model_name": "deepseek-chat",
-        "params": {},
+        "params": {"temperature": 0.0},
     },
     "deepseek_together_ai": {
         "client": _together_client,
