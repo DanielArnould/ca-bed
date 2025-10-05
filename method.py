@@ -158,17 +158,15 @@ def calculate_posterior(
     for h in prior:
         if h not in likelihoods:
             logger.warning(
-                f"{h} not found in likelihoods! Defaulting to {uniform_likelihood}..."
+                f"'{h}' not found in likelihoods ({list(likelihoods.keys())})! Defaulting to {uniform_likelihood}..."
             )
 
     unnormalised = {h: p for h, p in all_posteriors.items() if p >= min_probability}
 
-    # Ensure at least one hypothesis. This is just for sanity so other functions
-    # don't break. The marginal will be close to zero, so rewards shouldn't be
-    # affected.
+    # If filtering empties the belief state, use the non-filtered values
+    # This indicates a very unlikely path in the tree, so we don't save much by filtering
     if not unnormalised:
-        max_h = max(all_posteriors, key=all_posteriors.__getitem__)
-        unnormalised[max_h] = all_posteriors[max_h]
+        unnormalised = {h: p for h, p in all_posteriors.items()}
 
     marginal = sum(unnormalised.values())
     normalised = {h: p / marginal for h, p in unnormalised.items()}

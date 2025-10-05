@@ -12,13 +12,13 @@ from history import (
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
-from tasks.detective_cases.baseline import Baseline
-from tasks.detective_cases.baseline_multi import BaselineWithMultibranching
-from tasks.detective_cases.bayesian import Bayesian
-from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
-from tasks.detective_cases.data import load_all_data
-from tasks.detective_cases.direct import Direct
 from tasks.direct_prompting_task import DirectPromptingTask
+from tasks.med_dg.baseline import Baseline
+from tasks.med_dg.baseline_multi import BaselineWithMultibranching
+from tasks.med_dg.bayesian import Bayesian
+from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
+from tasks.med_dg.data import load_balanced_data
+from tasks.med_dg.direct import Direct
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -31,19 +31,19 @@ async def main(output_dir: Path) -> None:
     sharpness_constant = 0.4
     min_probability = 0.001
     max_concurrent = 1
-    clustering_threshold = 0.99
-    shared_question_cluster = False
-    dataset = load_all_data()
+    clustering_threshold = 0.97
+    shared_question_cluster = True
+    dataset = load_balanced_data(0.05)
 
     tasks = [
-        Direct(
+        Baseline(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
-            # max_question_nodes=2,
-            # max_lookahead_depth=3,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
             max_conversation_depth=5,
-            # confidence_threshold=0.95,
+            # confidence_threshold=0.7,
         )
         for item in dataset[1:2]
     ]
@@ -58,22 +58,22 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            # run_tree_based_task(
-            #     idx=i,
-            #     task=task,
-            #     output_dir=output_dir,
-            #     semaphore=semaphore,
-            #     sharpness_constant=sharpness_constant,
-            #     min_probability=min_probability,
-            #     question_clustering=(
-            #         shared_clustering
-            #         if shared_question_cluster
-            #         else QuestionClustering(clustering_threshold)
-            #     ),  # type: ignore
-            # )
-            run_direct_prompting_task(
-                idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            run_tree_based_task(
+                idx=i,
+                task=task,
+                output_dir=output_dir,
+                semaphore=semaphore,
+                sharpness_constant=sharpness_constant,
+                min_probability=min_probability,
+                question_clustering=(
+                    shared_clustering
+                    if shared_question_cluster
+                    else QuestionClustering(clustering_threshold)
+                ),  # type: ignore
             )
+            # run_direct_prompting_task(
+            #     idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            # )
             for i, task in enumerate(tasks)
         ]
     )
