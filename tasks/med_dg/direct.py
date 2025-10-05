@@ -9,31 +9,30 @@ from tasks.direct_prompting_task import (
     Prediction,
     Question,
 )
+from tasks.med_dg.data import MED_DG_SET, MedDGInstance
 
 
 class Direct(DirectPromptingTask):
-    self_report: str
+    instance: MedDGInstance
 
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        task_answer: str,
+        instance: MedDGInstance,
         max_conversation_depth: int,
-        hypothesis_space: list[str],
-        self_report: str,
     ):
-        self.self_report = self_report
+        self.instance = instance
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=task_answer,
+            task_answer=self.instance.disease,
             max_conversation_depth=max_conversation_depth,
-            hypothesis_space=hypothesis_space,
+            hypothesis_space=MED_DG_SET,
         )
 
     def __str__(self) -> str:
-        return f"MedDG (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.self_report=}"
+        return f"MedDG (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=} {self.instance.self_report=}"
 
     @override
     async def query_questioner(
@@ -44,8 +43,8 @@ class Direct(DirectPromptingTask):
         # Prologue
         possible_diseases = "\n".join(f"- {h}" for h in self.hypothesis_space)
         parts.append(
-            dedent("""\
-            You are an expert medical doctor, and your patient self-reports that: {self_report}. 
+            dedent(f"""\
+            You are an expert medical doctor, and your patient self-reports that: {self.instance.self_report}. 
                    
             The patient is suffering from one of the following possible diseases:      
             {possible_diseases}
@@ -58,22 +57,18 @@ class Direct(DirectPromptingTask):
 
             Otherwise, if you need more information, output:
             [QUESTION]: <Your question here>
-            """)
-            .format(self_report=self.self_report, possible_diseases=possible_diseases)
-            .strip()
+            """).strip()
         )
 
-        # Conversation History
+        # Conversation history
         history = get_conversation_history(current_node)
         if history:
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
-                dedent("""
-                These are the questions you've asked to the patient so far:
-                {history}
-                """)
-                .format(history=history_formatted)
-                .strip()
+                dedent(f"""\
+                These are the questions you've already asked so far:
+                {history_formatted}
+                """).strip()
             )
 
         # Targetting prompt
@@ -85,7 +80,7 @@ class Direct(DirectPromptingTask):
             )
 
         # Query LLM
-        prompt = "\n".join(parts)
+        prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
 
         # Parse LLM
@@ -104,14 +99,20 @@ class Direct(DirectPromptingTask):
     @override
     async def query_answerer(self, question: str) -> str:
         prompt = (
-            dedent("""\
-            You are the patient suffering from {target_item}, and I am the doctor. 
-            I will ask you questions, and you should answer each one truthfully based on your disease.
-            Let us begin. Here is my question:
-            {question}
+            dedent(f"""\
+            You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
+            I am your doctor and I will ask you questions about your condition.  
+            
+            ### Instructions
+            - Answer the doctor's question in character.
+            - Stay consistent with your task and story.
+            - Limit your response to 1 sentence only.
+
+            ### Question
+            "{question}"
             """)
             .format(target_item=self.task_answer, question=question)
             .strip()
         )
 
-        return await query_llm(prompt, self.answerer_session, max_tokens=50)
+        return await query_llm(prompt, self.answerer_session)
