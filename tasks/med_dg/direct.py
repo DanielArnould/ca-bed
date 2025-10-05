@@ -98,8 +98,7 @@ class Direct(DirectPromptingTask):
 
     @override
     async def query_answerer(self, question: str) -> str:
-        prompt = (
-            dedent(f"""\
+        prompt = dedent(f"""\
             You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
             I am your doctor and I will ask you questions about your condition.  
             
@@ -110,9 +109,6 @@ class Direct(DirectPromptingTask):
 
             ### Question
             "{question}"
-            """)
-            .format(target_item=self.task_answer, question=question)
-            .strip()
-        )
+            """).strip()
 
         return await query_llm(prompt, self.answerer_session)

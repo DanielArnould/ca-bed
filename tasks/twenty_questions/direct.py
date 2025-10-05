@@ -40,15 +40,15 @@ class Direct(DirectPromptingTask):
         # Prologue
         possible_items = "\n".join(f"- {h}" for h in self.hypothesis_space)
         parts.append(
-            dedent("""\
-            You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
-            The secret object could be one of the following:
+            dedent(f"""\
+            You are an expert player of the 20 Questions game. Your goal is to guess a secret entity, X. I will be impersonating the secret entity, X.
+            The secret entity could be one of the following:
             {possible_items}
             
             You can either ask questions that starts with 'Is X' and can only be answered by 'Yes' or 'No', or you can make a prediction of what X is.
             
             If you are confident enough to make a prediction, output:
-            [PREDICTION]: <This should ONLY be the exact name of the item from the list of possible items>
+            [PREDICTION]: <This should ONLY be the exact name of the entity from the list of possible entities>
 
             Otherwise, if you need more information, output:
             [QUESTION]: <Your yes/no question here>
@@ -57,17 +57,15 @@ class Direct(DirectPromptingTask):
             .strip()
         )
 
-        # Conversation History
+        # Conversation history
         history = get_conversation_history(current_node)
         if history:
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
-                dedent("""
-                These are the questions you've so far:
-                {history}
-                """)
-                .format(history=history_formatted)
-                .strip()
+                dedent(f"""\
+                These are the questions you've already asked so far:
+                {history_formatted}
+                """).strip()
             )
 
         # Targetting prompt
@@ -79,7 +77,7 @@ class Direct(DirectPromptingTask):
             )
 
         # Query LLM
-        prompt = "\n".join(parts)
+        prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
 
         # Parse LLM
@@ -97,16 +95,16 @@ class Direct(DirectPromptingTask):
 
     @override
     async def query_answerer(self, question: str) -> str:
-        prompt = (
-            dedent("""
-            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
+        prompt = dedent(f"""\
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {self.task_answer}.
             I will ask up to 20 questions and you should answer each one truthfully based on being X.
-            DO NOT REVEAL/MENTION WHAT X IS UNTIL I ASK "Is X ..."
-            Let us begin. Here is my question:
-            {question}
-            """)
-            .format(target_item=self.task_answer, question=question)
-            .strip()
-        )
+
+            ### Instructions
+            - Answer truthfully based on what X is.  
+            - Limit your response to 1 sentence only.
+
+            ### Question
+            "{question}"
+            """).strip()
 
         return await query_llm(prompt, self.answerer_session)
