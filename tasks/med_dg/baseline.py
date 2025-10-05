@@ -1,6 +1,8 @@
 from textwrap import dedent
 from typing import override
 
+from tenacity import retry, stop_after_attempt
+
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.med_dg.data import MED_DG_SET, MedDGInstance
@@ -125,6 +127,7 @@ class Baseline(Task):
         return {question.question: question.possible_answers for question in questions}
 
     @override
+    @retry(stop=stop_after_attempt(2))
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
