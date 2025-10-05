@@ -87,6 +87,44 @@ def format_candidate_movies(movies: Sequence[MovieLike]) -> str:
     return "\n".join(formatted)
 
 
+@dataclass(frozen=True)
+class MovieLensInstance:
+    persona: PersonaContext
+    candidate_movies: tuple[Movie, ...]
+    target_movie: Movie | None
+    preferred_movies: tuple[RatedMovie, ...]
+    disliked_movies: tuple[RatedMovie, ...]
+
+    def __init__(
+        self,
+        persona: PersonaContext,
+        candidate_movies: Sequence[Movie],
+        target_movie: Movie | None = None,
+        preferred_movies: Sequence[RatedMovie] | None = None,
+        disliked_movies: Sequence[RatedMovie] | None = None,
+    ) -> None:
+        if not candidate_movies:
+            raise ValueError("candidate_movies must not be empty")
+
+        normalised_candidates = tuple(candidate_movies)
+        candidate_titles = {movie.title for movie in normalised_candidates}
+
+        if target_movie is not None and target_movie.title not in candidate_titles:
+            raise ValueError(
+                "target_movie must be included in candidate_movies"
+            )
+
+        object.__setattr__(self, "persona", persona)
+        object.__setattr__(self, "candidate_movies", normalised_candidates)
+        object.__setattr__(self, "target_movie", target_movie)
+        object.__setattr__(self, "preferred_movies", tuple(preferred_movies or ()))
+        object.__setattr__(self, "disliked_movies", tuple(disliked_movies or ()))
+
+    @property
+    def hypothesis_space(self) -> list[str]:
+        return [movie.title for movie in self.candidate_movies]
+
+
 def _format_section(title: str, items: Sequence[str]) -> str:
     clean_items = [item for item in items if item]
     if not clean_items:

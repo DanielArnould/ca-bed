@@ -10,9 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import get_close_matches
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, TYPE_CHECKING
 
-from models import Model, call_llm
+from models import LLMRequestSession, llm_models, query_llm
+
+if TYPE_CHECKING:
+    from .common import MovieLensInstance, PersonaContext
 
 LOGGER = logging.getLogger("MovieLensPersonaPipeline")
 
@@ -480,16 +483,19 @@ def build_persona_prompt(
 
 async def generate_persona(
     profile: UserProfile,
-    model: Model,
+    model_key: str,
     semaphore: asyncio.Semaphore,
 ) -> tuple[dict[str, Any], int, int, list[str]]:
     top_genres = compute_top_genres(profile.high_rated)
     liked_block = format_ratings_for_prompt(profile.high_rated, PROMPT_LIKES_LIMIT)
     disliked_block = format_ratings_for_prompt(profile.low_rated, PROMPT_DISLIKES_LIMIT)
     prompt = build_persona_prompt(profile, top_genres, liked_block, disliked_block)
+    session = LLMRequestSession(model_key)
     async with semaphore:
-        response_text, prompt_tokens, completion_tokens = await call_llm(prompt, model)
+        response_text = await query_llm(prompt, session)
         await asyncio.sleep(API_CALL_DELAY_SECONDS)
+    prompt_tokens = session.total_input_tokens
+    completion_tokens = session.total_output_tokens
     payload_text = strip_code_fence(response_text)
     try:
         persona = json.loads(payload_text)
@@ -547,7 +553,7 @@ def validate_persona(persona: dict[str, Any], genre_catalog: list[str]) -> dict[
 async def build_curated_dataset(
     persona_count: int,
     paths: MovieLensPaths,
-    model: Model,
+    model_key: str,
     seed: int,
     max_concurrency: int,
     pool_size: int | None,
@@ -600,7 +606,7 @@ async def build_curated_dataset(
 
     semaphore = asyncio.Semaphore(max_concurrency)
     persona_results = await asyncio.gather(
-        *[generate_persona(profile, model, semaphore) for profile in selected_profiles]
+        *[generate_persona(profile, model_key, semaphore) for profile in selected_profiles]
     )
 
     hypothesis_pool = build_balanced_hypothesis_pool(
@@ -644,7 +650,7 @@ async def build_curated_dataset(
         "persona_count": persona_count,
         "requested_hypothesis_pool_size": requested_pool_size,
         "hypothesis_pool_size": len(hypothesis_pool),
-        "model": model.name,
+        "model": model_key,
         "seed": seed,
         "total_prompt_tokens": total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,
@@ -684,7 +690,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=5, help="Number of personas to generate")
     parser.add_argument("--pool-size", type=int, default=None, help="Total number of movies in the combined hypothesis pool (defaults to entire catalog when omitted)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for movie selection")
-    parser.add_argument("--model", type=str, default="GPT_5", help="Model enum name to use for persona generation")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt_5",
+        help="Model key from models.llm_models to use for persona generation",
+    )
     parser.add_argument("--max-concurrency", type=int, default=3, help="Maximum simultaneous LLM calls")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
@@ -701,12 +712,13 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def resolve_model(model_name: str) -> Model:
-    try:
-        return Model[model_name]
-    except KeyError as exc:
-        available = ", ".join(model.name for model in Model)
-        raise SystemExit(f"Unknown model '{model_name}'. Available options: {available}") from exc
+def resolve_model(model_name: str) -> str:
+    if model_name not in llm_models:
+        available = ", ".join(sorted(llm_models.keys()))
+        raise SystemExit(
+            f"Unknown model '{model_name}'. Available options: {available}"
+        )
+    return model_name
 
 @dataclass(frozen=True)
 class PersonaRecord:
@@ -754,14 +766,6 @@ class RatedMovie(Movie):
         )
 
 
-@dataclass(frozen=True)
-class MovieLensItem:
-    persona_name: str
-    persona: PersonaRecord
-    preferred_movies: list[RatedMovie]
-    disliked_movies: list[RatedMovie]
-
-
 def _persona_from_payload(payload: dict[str, Any]) -> PersonaRecord:
     return PersonaRecord(
         persona_name=payload.get("persona_name", "Unknown"),
@@ -786,7 +790,7 @@ def load_balanced_dataset(
     dataset_path: Path | None = None,
     fraction: float = 1.0,
     seed: int | None = 42,
-) -> tuple[list[MovieLensItem], list[Movie]]:
+) -> list["MovieLensInstance"]:
     if dataset_path is None:
         default_dir = detect_default_data_dir()
         if default_dir is None:
@@ -806,7 +810,15 @@ def load_balanced_dataset(
     hypothesis_pool = [Movie.from_payload(movie) for movie in data.get("hypothesis_pool", [])]
     personas = data.get("personas", [])
 
-    items: list[MovieLensItem] = []
+    from .common import (
+        MovieLensInstance,
+        PersonaContext,
+        persona_record_to_context,
+    )
+
+    persona_entries: list[
+        tuple[PersonaContext, tuple[RatedMovie, ...], tuple[RatedMovie, ...], frozenset[int]]
+    ] = []
 
     for entry in personas:
         persona_payload = entry.get("persona", {})
@@ -814,49 +826,86 @@ def load_balanced_dataset(
         disliked_payloads = entry.get("disliked_movies", [])
 
         persona_record = _persona_from_payload(persona_payload)
-        preferred_movies = [RatedMovie.from_payload(p) for p in preferred_payloads]
-        disliked_movies = [RatedMovie.from_payload(p) for p in disliked_payloads]
-
-        item = MovieLensItem(
-            persona_name=persona_record.persona_name,
-            persona=persona_record,
-            preferred_movies=preferred_movies,
-            disliked_movies=disliked_movies,
+        preferred_movies = tuple(
+            RatedMovie.from_payload(p) for p in preferred_payloads
         )
-        items.append(item)
+        disliked_movies = tuple(
+            RatedMovie.from_payload(p) for p in disliked_payloads
+        )
 
-    items.sort(key=lambda item: item.persona_name)
+        persona_context = persona_record_to_context(
+            persona_record, preferred_movies, disliked_movies
+        )
 
-    if fraction >= 1 or not items:
-        return items, hypothesis_pool
+        preferred_ids = frozenset(
+            movie.id for movie in preferred_movies if getattr(movie, "id", None) is not None
+        )
 
-    rng = random.Random(seed)
-    target_size = max(1, int(round(len(items) * fraction)))
+        persona_entries.append(
+            (persona_context, preferred_movies, disliked_movies, preferred_ids)
+        )
 
-    grouped: dict[frozenset[int], list[MovieLensItem]] = {}
-    for item in items:
-        key = frozenset(movie.id for movie in item.preferred_movies)
-        grouped.setdefault(key, []).append(item)
+    persona_entries.sort(key=lambda item: item[0].name or "")
 
-    sampled_items: list[MovieLensItem] = []
+    if fraction >= 1 or not persona_entries:
+        selected_entries = persona_entries
+    else:
+        rng = random.Random(seed)
+        target_size = max(1, int(round(len(persona_entries) * fraction)))
 
-    for group_items in grouped.values():
-        group_size = len(group_items)
-        desired = max(1, int(round(group_size * fraction)))
-        if desired >= group_size:
-            sampled_items.extend(group_items)
-        else:
-            sampled_items.extend(rng.sample(group_items, desired))
+        grouped: dict[
+            frozenset[int],
+            list[
+                tuple[
+                    PersonaContext,
+                    tuple[RatedMovie, ...],
+                    tuple[RatedMovie, ...],
+                    frozenset[int],
+                ]
+            ],
+        ] = {}
+        for entry in persona_entries:
+            grouped.setdefault(entry[3], []).append(entry)
 
-    if len(sampled_items) > target_size:
-        sampled_items = rng.sample(sampled_items, target_size)
-    elif len(sampled_items) < target_size:
-        remaining = [item for item in items if item not in sampled_items]
-        needed = target_size - len(sampled_items)
-        sampled_items.extend(rng.sample(remaining, min(needed, len(remaining))))
+        sampled_entries: list[
+            tuple[
+                PersonaContext,
+                tuple[RatedMovie, ...],
+                tuple[RatedMovie, ...],
+                frozenset[int],
+            ]
+        ] = []
 
-    sampled_items.sort(key=lambda item: item.persona_name)
-    return sampled_items, hypothesis_pool
+        for group_entries in grouped.values():
+            group_size = len(group_entries)
+            desired = max(1, int(round(group_size * fraction)))
+            if desired >= group_size:
+                sampled_entries.extend(group_entries)
+            else:
+                sampled_entries.extend(rng.sample(group_entries, desired))
+
+        if len(sampled_entries) > target_size:
+            sampled_entries = rng.sample(sampled_entries, target_size)
+        elif len(sampled_entries) < target_size:
+            remaining = [entry for entry in persona_entries if entry not in sampled_entries]
+            needed = target_size - len(sampled_entries)
+            sampled_entries.extend(rng.sample(remaining, min(needed, len(remaining))))
+
+        sampled_entries.sort(key=lambda item: item[0].name or "")
+        selected_entries = sampled_entries
+
+    instances = [
+        MovieLensInstance(
+            persona=context,
+            candidate_movies=hypothesis_pool,
+            target_movie=None,
+            preferred_movies=preferred,
+            disliked_movies=disliked,
+        )
+        for context, preferred, disliked, _ in selected_entries
+    ]
+
+    return instances
 
 
 
@@ -866,13 +915,13 @@ async def async_main() -> None:
     args = parse_args()
     configure_logging(args.verbose)
     paths = MovieLensPaths.build(args.data_dir)
-    model = resolve_model(args.model)
+    model_key = resolve_model(args.model)
     pool_size = args.pool_size
 
     dataset = await build_curated_dataset(
         persona_count=args.count,
         paths=paths,
-        model=model,
+        model_key=model_key,
         seed=args.seed,
         max_concurrency=args.max_concurrency,
         pool_size=pool_size,

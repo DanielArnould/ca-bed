@@ -15,7 +15,7 @@ class Task(ABC):
 
     questioner_session: LLMRequestSession
     answerer_session: LLMRequestSession
-    task_answer: str
+    task_answer: str | None
     max_question_nodes: int  # Max number of questions to generate at each step
     max_lookahead_depth: int
     max_conversation_depth: int
@@ -26,7 +26,7 @@ class Task(ABC):
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        task_answer: str,
+        task_answer: str | None,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,

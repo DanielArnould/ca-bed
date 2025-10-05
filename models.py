@@ -83,6 +83,11 @@ llm_models: dict[str, dict] = {
         "model_name": "openai/gpt-oss-20b",
         "params": {"reasoning_effort": "low", "temperature": 0.0},
     },
+    "gpt_5": {
+        "client": _openai_client,
+        "model_name": "gpt-5",
+        "params": {},
+    },
     "dummy": {
         "client": None,
         "model_name": "dummy",
@@ -117,7 +122,10 @@ async def query_llm(
 
     client: AsyncOpenAI | None = model_config["client"]
     model_name: str = model_config["model_name"]
-    extra_params: dict = model_config["params"]
+    params: dict = model_config["params"]
+
+    if model_name != 'gpt-5':
+        params['max_tokens'] = max_tokens
 
     if client is None:
         raise RuntimeError(f"No API client configured for model: {session.model_key}")
@@ -128,8 +136,7 @@ async def query_llm(
         model=model_name,
         messages=[{"role": "user", "content": input_text}],
         stream=False,
-        max_tokens=max_tokens,
-        **extra_params,  # type: ignore
+        **params,  # type: ignore
     )
 
     elapsed = time.perf_counter() - start_time

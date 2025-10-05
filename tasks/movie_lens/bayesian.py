@@ -1,195 +1,213 @@
 from __future__ import annotations
 
-import json
-import re
 from textwrap import dedent
 from typing import override
 
-from models import Model, call_llm
-from node import EvidenceNode, QuestionNode
-from tasks.task import Task
+from tenacity import retry, stop_after_attempt
 
-from .common import PersonaContext, format_candidate_movies, format_persona_context
-from .data import Movie
+from models import LLMRequestSession, query_llm
+from node import EvidenceNode, QuestionNode, get_conversation_history
+from tasks.task import (
+    Task,
+    parse_answer,
+    parse_binary_questions,
+    parse_probabilities,
+)
+
+from .common import MovieLensInstance, format_candidate_movies, format_persona_context
 
 
 class Bayesian(Task):
-    persona: PersonaContext
-    candidate_movies: list[Movie]
+    instance: MovieLensInstance
 
     def __init__(
         self,
+        questioner_session: LLMRequestSession,
+        answerer_session: LLMRequestSession,
+        instance: MovieLensInstance,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
-        persona: PersonaContext,
-        candidate_movies: list[Movie],
-    ):
-        if not candidate_movies:
-            raise ValueError("candidate_movies must not be empty")
-
-        movie_titles: list[str] = []
-        movie_records: list[Movie] = []
-        movie_lookup: dict[str, Movie] = {}
-        for movie in candidate_movies:
-            title = str(getattr(movie, "title", "")).strip()
-            if not title:
-                raise ValueError("Each candidate movie must include a title")
-            movie_titles.append(title)
-            movie_records.append(movie)
-            movie_lookup[title] = movie
-
-        self.persona = persona
-        self.candidate_movies = movie_records
-        self._movie_lookup = movie_lookup
-        self._persona_block = format_persona_context(persona)
-        self._candidate_block = format_candidate_movies(movie_records)
+    ) -> None:
+        self.instance = instance
+        self._persona_block = format_persona_context(instance.persona)
+        self._candidate_block = format_candidate_movies(instance.candidate_movies)
 
         super().__init__(
-            None,
-            max_question_nodes,
-            max_evidence_nodes=2,
+            questioner_session=questioner_session,
+            answerer_session=answerer_session,
+            task_answer=instance.target_movie.title if instance.target_movie else None,
+            max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=confidence_threshold,
-            hypothesis_space=movie_titles,
+            hypothesis_space=instance.hypothesis_space,
         )
 
     def __str__(self) -> str:
+        persona_name = self.instance.persona.name or "Unknown Persona"
         return (
             "MovieLens (Bayesian): "
+            f"task_answer={self.task_answer!r} "
             f"max_question_nodes={self.max_question_nodes} "
-            f"max_lookahead_depth={self.max_lookahead_depth} max_conversation_depth={self.max_conversation_depth} "
-            f"confidence_threshold={self.confidence_threshold} persona={self.persona.name!r}"
+            f"max_lookahead_depth={self.max_lookahead_depth} "
+            f"max_conversation_depth={self.max_conversation_depth} "
+            f"confidence_threshold={self.confidence_threshold} "
+            f"persona={persona_name!r}"
         )
 
     @override
-    async def create_root(self, model: Model) -> tuple[EvidenceNode, int, int]:
-        uniform_probability = 1.0 / len(self.hypothesis_space)
-        uniform_prior = {hypothesis: uniform_probability for hypothesis in self.hypothesis_space}
-        return EvidenceNode("ROOT", uniform_prior, 1.0), 0, 0
+    async def create_initial_belief_state(self) -> dict[str, float]:
+        uniform = 1.0 / len(self.hypothesis_space)
+        return {title: uniform for title in self.hypothesis_space}
 
     @override
-    def get_question_generation_prompt(self, current_node: EvidenceNode) -> str:
-        history: list[tuple[str, str]] = []
-        node = current_node
-        while node.parent:
-            history.append((node.parent.question, node.answer))
-            node = node.parent.parent
-        history.reverse()
+    async def create_questions(
+        self, current_node: EvidenceNode
+    ) -> dict[str, list[str]]:
+        parts: list[str] = []
 
-        belief_block = "\n".join(
-            f"- Movie: {title}; Probability: {prob:.4f}"
-            for title, prob in current_node.belief_state.items()
+        parts.append(
+            dedent(
+                f"""\
+                You are an expert film curator in a live conversation with a movie lover. Your goal is to discover which film from the candidate list below to recommend based solely on the dialogue.
+
+                ### Candidate Films
+                {self._candidate_block}
+                """
+            ).strip()
         )
-        history_block = "\n".join(f"- Q: {q}\n  A: {a}" for q, a in history)
 
-        prompt_parts = [
-            dedent("""\
-            You are an expert film diagnostician narrowing down which movie in a curated slate are suited for me.
-
-            Candidate films:
-            {candidate_block}
-            """)
-            .format(
-                candidate_block=self._candidate_block,
-            )
-            .strip()
-        ]
-
+        history = get_conversation_history(current_node)
         if history:
-            prompt_parts.append(
-                dedent("""\
-                Conversation history (your questions vs. my YES/NO replies):
-                {history}
-                """)
-                .format(history=history_block)
-                .strip()
+            history_formatted = "\n".join(
+                f"- Q: {question}; A: {answer}" for question, answer in history
+            )
+            parts.append(
+                dedent(
+                    f"""
+                    These are the questions asked so far and the user's replies:
+                    {history_formatted}
+                    """
+                ).strip()
             )
 
-        prompt_parts.append(
-            dedent("""\
-            Current belief over the movies:
-            {belief_block}
-
-            Devise {num_questions} incisive YES/NO questions that will best separate the remaining contenders. Ask about cinematic qualities, plot elements, themes, or emotional tone that I can answer succinctly.
-            Response format:
-            1. <Question 1>
-            2. <Question 2>
-            ...
-            n. <Question n>
-            """)
-            .format(
-                belief_block=belief_block or "- (beliefs not yet established)",
-                num_questions=self.max_question_nodes,
+        belief_state_formatted = "\n".join(
+            f"- Film: {title}; Probability: {prob:.3f}"
+            for title, prob in sorted(
+                current_node.belief_state.items(), key=lambda item: item[1], reverse=True
             )
-            .strip()
         )
 
-        return "\n\n".join(prompt_parts)
+        if belief_state_formatted:
+            parts.append(
+                dedent(
+                    f"""\
+                    Current belief distribution over the films:
+                    {belief_state_formatted}
+                    """
+                ).strip()
+            )
+
+        parts.append(
+            dedent(
+                f"""
+                Your task is to generate {self.max_question_nodes} excellent YES/NO questions to ask the user next.
+                The best questions help you learn their tastes from scratch and meaningfully sharpen the probability distribution across the candidate films.
+
+                Format your response exactly as:
+                1. <Question 1>
+                2. <Question 2>
+                ...
+                n. <Question n>
+                """
+            ).strip()
+        )
+
+        prompt = "\n\n".join(parts)
+        output = await query_llm(prompt, self.questioner_session)
+        questions = parse_binary_questions(output)
+
+        return {question.question: question.possible_answers for question in questions}
 
     @override
-    def parse_question_generation_output(self, output: str) -> list[str]:
-        question_texts = re.findall(r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE)
-        return [text.strip().rstrip("?") + "?" for text in question_texts]
+    @retry(stop=stop_after_attempt(2))
+    async def get_likelihoods(
+        self, question: str, answers: list[str], hypotheses: list[str]
+    ) -> dict[str, dict[str, float]]:
+        prompt = dedent(
+            f"""\
+            You are estimating how likely a user would answer "Yes" to a question if each film below ended up being your final recommendation.
 
-    @override
-    def get_likelihood_elicitation_prompt(self, question: str) -> str:
-        return (
-            dedent("""\
-            Estimate how likely I would answer YES to the question if each film were my preferred pick.
+            ### Candidate Films
+            {self._candidate_block}
 
-            Candidate films:
-            {candidate_block}
-
-            Question:
+            ### Question
             "{question}"
 
-            Provide a single JSON object where each key is an exact film title and each value is the probability (0.0 to 1.0) that I would answer YES if that film were a match. Cover every film exactly once.
-            """)
-            .format(
-                candidate_block=self._candidate_block,
-                question=question,
-            )
-            .strip()
+            ### Task
+            - For each film, assume it is the correct recommendation for the user.
+            - Estimate the probability (0.0 to 1.0) that the user would answer "Yes".
+            - Probabilities must be rounded to two decimals.
+            - Use only the exact film titles.
+
+            ### Response Format
+            1. <Film Title>|<probability>
+            2. <Film Title>|<probability>
+            ...
+
+            Do not include commentary or extra text.
+            """
+        ).strip()
+
+        output = await query_llm(prompt, self.questioner_session)
+        probabilities = parse_probabilities(output)
+
+        likelihood_map: dict[str, dict[str, float]] = {}
+        for probability in probabilities:
+            if probability.hypothesis not in hypotheses:
+                continue
+            yes_prob = max(0.0, min(1.0, probability.probability))
+            likelihood_map[probability.hypothesis] = {
+                "Yes": yes_prob,
+                "No": 1.0 - yes_prob,
+            }
+
+        missing = set(hypotheses) - set(likelihood_map)
+        if missing:
+            for hypothesis in missing:
+                likelihood_map[hypothesis] = {"Yes": 0.5, "No": 0.5}
+
+        return likelihood_map
+
+    @override
+    async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
+        persona_name = self.instance.persona.name or "the movie lover"
+        gender_note = (
+            f" {self.instance.persona.gender.lower()}"
+            if self.instance.persona.gender
+            else ""
+        )
+        options_block = ", ".join(
+            f'"{answer}"' for answer in current_node.possible_answers
         )
 
-    @override
-    def parse_likelihood_elicitation_output(
-        self, output: str
-    ) -> dict[str, dict[str, float]]:
-        cleaned_output = output[output.rfind("{") : output.rfind("}") + 1]
-        probs: dict[str, float] = json.loads(cleaned_output)
-        filtered = {
-            title: float(max(0.0, min(1.0, probs.get(title, 0.0))))
-            for title in self.hypothesis_space
-        }
-        return {
-            "Yes": filtered,
-            "No": {title: 1.0 - prob for title, prob in filtered.items()},
-        }
-
-    @override
-    def get_answer_selection_prompt(self, question_node: QuestionNode) -> str:
-        persona_name = self.persona.name or "the movie lover"
-        gender_note = f" {self.persona.gender.lower()}" if self.persona.gender else ""
-        return (
-            dedent("""\
-            You are {persona_name}{gender_note}. Stay entirely in character and use the persona briefing below to ground your answer.
+        prompt = dedent(
+            f"""\
+            You are {persona_name}{gender_note}. Stay fully in character and rely on the persona briefing when answering.
 
             Persona briefing:
-            {persona_block}
+            {self._persona_block}
 
-            Question: {question}
+            Available responses: {options_block}
 
-            Reply with ONLY "Yes" or "No". Consider whether a movie that epitomises your tastes would truthfully earn a "Yes" to that question.
-            """)
-            .format(
-                persona_name=persona_name,
-                gender_note=gender_note,
-                persona_block=self._persona_block,
-                question=question_node.question,
-            )
-            .strip()
-        )
+            ### Question
+            "{current_node.question}"
+
+            Reply with EXACTLY one of the available responses—no additional words.
+            """
+        ).strip()
+
+        output = await query_llm(prompt, self.answerer_session)
+        return parse_answer(output, current_node)
