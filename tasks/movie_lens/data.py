@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -59,6 +60,40 @@ PROMPT_LIKES_LIMIT = 12
 PROMPT_DISLIKES_LIMIT = 6
 
 
+_ARTICLES_TO_PREFIX = ("The", "An", "A")
+
+
+def _normalise_leading_article(title: str | None) -> str | None:
+    if not title:
+        return title
+
+    title = title.strip()
+    match = re.match(r"^(?P<body>.*?)(?P<year>\s*\(.*\))$", title)
+    if match:
+        body = match.group("body").rstrip()
+        year = match.group("year").strip()
+    else:
+        body = title
+        year = ""
+
+    for article in _ARTICLES_TO_PREFIX:
+        pattern = re.compile(rf",\s*({article})$", re.IGNORECASE)
+        found = pattern.search(body)
+        if not found:
+            continue
+
+        article_text = found.group(1)
+        body = pattern.sub("", body).strip()
+        if body:
+            normalised = f"{article_text.capitalize()} {body}"
+        else:
+            normalised = article_text.capitalize()
+
+        return f"{normalised} {year}".strip()
+
+    return title
+
+
 @dataclass(frozen=True)
 class Movie:
     id: int
@@ -82,7 +117,7 @@ class Movie:
     def from_payload(cls, payload: dict[str, Any]) -> "RatedMovie":
         return cls(
             id=payload.get("id"),
-            title=payload.get("title"),
+            title=_normalise_leading_article(payload.get("title")),
             release_date=payload.get("release_date"),
             video_release_date=payload.get("video_release_date"),
             imdb_url=payload.get("imdb_url"),
@@ -164,7 +199,7 @@ def load_movies(path: Path, genre_catalog: list[str]) -> list[Movie]:
         if len(parts) < 5:
             raise ValueError(f"Malformed movie line: {line!r}")
         movie_id = int(parts[0])
-        title = parts[1]
+        title = _normalise_leading_article(parts[1])
         release_date = parts[2] or None
         video_release_date = parts[3] or None
         imdb_url = parts[4] or None

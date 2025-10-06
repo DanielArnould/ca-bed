@@ -6,6 +6,7 @@ from tasks.direct_prompting_task import (
     DirectPromptingTask,
     Prediction,
     Question,
+    Recommendations,
 )
 
 
@@ -46,7 +47,45 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
         # Get response from questioner model
         response = await task.query_questioner(current_node)
 
+        break_after_iteration = False
+
         match response:
+            case Recommendations(values):
+                # Treat final recommendation list as a terminal action.
+                question_node = QuestionNode(
+                    "Final recommendation list",
+                    possible_answers=[],
+                    parent=current_node,
+                )
+                current_node.children.append(question_node)
+                final_path.append(str(question_node))
+
+                deduped: list[str] = []
+                seen: set[str] = set()
+                for title in values:
+                    if title in seen:
+                        continue
+                    if task.hypothesis_space and title not in task.hypothesis_space:
+                        continue
+                    seen.add(title)
+                    deduped.append(title)
+
+                updated_belief_state = current_node.belief_state.copy()
+                for title in deduped:
+                    prediction_count += 1
+                    updated_belief_state = calculate_posterior(
+                        updated_belief_state, title, prediction_count
+                    )
+
+                if deduped:
+                    evidence_answer = "\n".join(
+                        f"{idx}. {title}" for idx, title in enumerate(deduped, start=1)
+                    )
+                else:
+                    evidence_answer = "No valid recommendations provided."
+
+                break_after_iteration = True
+
             case Prediction(prediction):
                 # Create question node for prediction
                 question_node = QuestionNode(
@@ -92,6 +131,9 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
         question_node.children.append(evidence_node)
         current_node = evidence_node
         final_path.append(str(evidence_node))
+
+        if break_after_iteration:
+            break
 
     end_time = datetime.now()
     logger.info(f"Completed run in {end_time - start_time}s!")

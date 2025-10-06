@@ -71,10 +71,12 @@ class Bayesian(Task):
         parts.append(
             dedent(
                 f"""\
-                You are an expert film curator in a live conversation with a movie lover. Your goal is to discover which film from the candidate list below to recommend based solely on the dialogue.
+                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist.
 
                 ### Candidate Films
                 {self._candidate_block}
+
+                Use the user's answers to understand their taste. Ask concise YES/NO questions that reveal concrete preferences about tone, pacing, genre blends, themes, or iconic elements. Avoid repeating or paraphrasing earlier questions.
                 """
             ).strip()
         )
@@ -87,7 +89,7 @@ class Bayesian(Task):
             parts.append(
                 dedent(
                     f"""
-                    These are the questions asked so far and the user's replies:
+                    These are the questions asked so far and the user's answers:
                     {history_formatted}
                     """
                 ).strip()
@@ -114,7 +116,7 @@ class Bayesian(Task):
             dedent(
                 f"""
                 Your task is to generate {self.max_question_nodes} excellent YES/NO questions to ask the user next.
-                The best questions help you learn their tastes from scratch and meaningfully sharpen the probability distribution across the candidate films.
+                The best questions help you learn their tastes from scratch and sharply distinguish between the remaining candidate films using concrete cinematic traits, plot points, themes, or tonal qualities.
 
                 Format your response exactly as:
                 1. <Question 1>

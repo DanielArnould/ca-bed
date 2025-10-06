@@ -69,10 +69,12 @@ class Baseline(Task):
         parts.append(
             dedent(
                 f"""\
-                You are an expert film curator in a live conversation with a movie lover. Your goal is to discover which film from the candidate list below to recommend based solely on the dialogue.
+                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist.
 
                 ### Candidate Films
                 {self._candidate_block}
+
+                Use the user's answers to understand their taste. Ask concise YES/NO questions that reveal concrete preferences about tone, pacing, genre blends, themes, or iconic elements. Avoid repeating or paraphrasing earlier questions.
                 """
             ).strip()
         )
@@ -85,7 +87,7 @@ class Baseline(Task):
             parts.append(
                 dedent(
                     f"""
-                    These are the questions asked so far and the user's replies:
+                    These are the questions asked so far and the user's answers:
                     {history_formatted}
                     """
                 ).strip()
