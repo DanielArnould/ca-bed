@@ -46,7 +46,12 @@ llm_models: dict[str, dict] = {
     "deepseek_chat": {
         "client": _deepseek_client,
         "model_name": "deepseek-chat",
-        "params": {"temperature": 0.0},
+        "params": {},
+    },
+    "deepseek_reasoner": {
+        "client": _deepseek_client,
+        "model_name": "deepseek-reasoner",
+        "params": {},
     },
     "deepseek_together_ai": {
         "client": _together_client,
@@ -56,7 +61,7 @@ llm_models: dict[str, dict] = {
     "gpt_4o_mini": {
         "client": _openai_client,
         "model_name": "gpt-4o-mini-2024-07-18",
-        "params": {"temperature": 0.0},
+        "params": {},
     },
     "llama_3_3_70b": {
         "client": _together_client,
@@ -81,7 +86,7 @@ llm_models: dict[str, dict] = {
     "gpt_oss_20b": {
         "client": _together_client,
         "model_name": "openai/gpt-oss-20b",
-        "params": {"reasoning_effort": "low", "temperature": 0.0},
+        "params": {"reasoning_effort": "low"},
     },
     "dummy": {
         "client": None,
@@ -105,9 +110,7 @@ class LLMRequestSession:
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_random_exponential(min=3, max=60))
-async def query_llm(
-    input_text: str, session: LLMRequestSession, max_tokens: int = 4096
-) -> str:
+async def query_llm(input_text: str, session: LLMRequestSession) -> str:
     if session.model_key == "dummy":
         print(f"[DUMMY LLM] Prompt: {input_text}")
         return input("Enter a mock response: ")
@@ -128,7 +131,8 @@ async def query_llm(
         model=model_name,
         messages=[{"role": "user", "content": input_text}],
         stream=False,
-        max_tokens=max_tokens,
+        # max_tokens=max_tokens,
+        temperature=0.0,
         **extra_params,  # type: ignore
     )
 
