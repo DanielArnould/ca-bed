@@ -1,10 +1,10 @@
-import json
-import re
 from textwrap import dedent
 from typing import override
+
+from tenacity import retry, stop_after_attempt
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.task import Task
+from tasks.task import Task, parse_answer, parse_binary_questions, parse_probabilities
 
 
 class Bayesian(Task):
@@ -39,13 +39,15 @@ class Bayesian(Task):
         return {hypothesis: uniform_probability for hypothesis in self.hypothesis_space}
 
     @override
-    async def create_questions(self, current_node: EvidenceNode) -> list[str]:
+    async def create_questions(
+        self, current_node: EvidenceNode
+    ) -> dict[str, list[str]]:
         parts = []
 
         # Prologue
         parts.append(
             dedent("""
-                You are an expert player of the 20 Questions game. Your goal is to guess a secret object, X. I will be impersonating the secret object, X.
+                You are an expert player of the 20 Questions game. Your goal is to guess a secret entity, X. I will be impersonating the secret entity, X.
                 You will ask me up to 20 questions which start with 'Is X' and can only be answered by 'Yes' or 'No', and I will answer each one truthfully based on being X.
             """).strip()
         )
@@ -55,12 +57,10 @@ class Bayesian(Task):
         if history:
             history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
             parts.append(
-                dedent("""
+                dedent(f"""
                 The game has proceeded as follows:
-                {history}
-                """)
-                .format(history=history_formatted)
-                .strip()
+                {history_formatted}
+                """).strip()
             )
 
         # Current belief state
@@ -69,114 +69,93 @@ class Bayesian(Task):
             for hypo, prob in current_node.belief_state.items()
         )
         parts.append(
-            dedent("""
-                Based on our current beliefs, the secret object is most likely one of the following items, which are listed along with their probabilities:
-                {belief}
-                """)
-            .format(belief=belief_state_formatted)
-            .strip()
+            dedent(f"""
+                Based on our current beliefs, the secret entity is most likely one of the following, which are listed along with their probabilities:
+                {belief_state_formatted}
+                """).strip()
         )
 
         # Question generation
         parts.append(
-            dedent("""
-                Your task is to generate {num_questions} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
+            dedent(f"""
+                Your task is to generate {self.max_question_nodes} *excellent* yes/no questions to ask next. The best questions are those that will help distinguish between these likely possibilities.
                 Format your response in this structure:
                 1. <Question 1>
                 2. <Question 2>
                 ...
                 n. <Question n>
-                """)
-            .format(num_questions=self.max_question_nodes)
-            .strip()
+                """).strip()
         )
 
         # Query LLM
-        prompt = "\n".join(parts)
+        prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
+        questions = parse_binary_questions(output)
 
-        # Parse LLM
-        question_texts: list[str] = re.findall(
-            r"\d+\.\s+(.*?)(?=\s*\d+\.|$)", output, re.MULTILINE
-        )
-        questions = [question_text.strip() for question_text in question_texts]
-        assert len(questions) > 0, "No questions generated!"
-        return questions
+        return {question.question: question.possible_answers for question in questions}
 
     @override
+    @retry(stop=stop_after_attempt(2))
     async def get_likelihoods(
-        self, question: str, hypotheses: list[str]
+        self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
         # Query LLM
         hypotheses_formatted = "\n".join(f"- {h}" for h in hypotheses)
+        prompt = dedent(f"""
+            You are playing a game of 20 Questions.
 
-        prompt = (
-            dedent("""
-            Assume you are playing a game of 20 Questions. You need to estimate the probability of a "Yes" answer for a list of different potential secret objects, given a single question.
+            ### Possible entities
+            {hypotheses_formatted}
 
-            The question is:
-            "{candidate_question}"
+            ### Question
+            "{question}"
 
-            For each of the following items, estimate the probability that a person would answer "Yes" to the question above if that item were the secret object.
+            ### Task
+            For each entity, estimate the likelihood that the answer to the question would be 'Yes',
+            assuming that was the entity. Probabilities must:
+            - Be rounded to two decimals
 
-            Items:
-            {hypotheses}
+            ### Response Format
+            One line per entity:
+            <sequence_number>. <Entity>|<probability>
+                
+            ### Example
+            1. Dog|0.80
+            2. Cookie|0.50
 
-            Please provide your response ONLY as a single JSON object. The keys should be the item names and the values should be the estimated probability (a float between 0.0 and 1.0).
-
-            Example format for the question "Is it an animal?" (THE FOLLOWING PROBABILITIES ARE HYPOTHETICAL):
-            {{
-            "Dog": 0.99,
-            "Cookie": 0.0,
-            "Paint": 0.0,
-            "Hat": 0.0
-            }}
-            """)
-            .format(
-                candidate_question=question,
-                hypotheses=hypotheses_formatted,
-            )
-            .strip()
-        )
+            Do not include commentary or explanations—return only the formatted response.
+            """).strip()
 
         output = await query_llm(prompt, self.questioner_session)
 
-        # Parse LLM
-        cleaned_output = output[output.find("{") : output.rfind("}") + 1]
-        probs: dict = json.loads(cleaned_output)
+        # Query LLM
+        output = await query_llm(prompt, self.questioner_session)
+        probabilities = parse_probabilities(output)
+
         likelihoods = {
-            item: {
-                "Yes": (adjusted_prob := (max(min(prob, 1 - (1e-10)), 1e-10))),
-                "No": 1 - adjusted_prob,
+            probability.hypothesis: {
+                "Yes": probability.probability,
+                "No": 1 - probability.probability,
             }
-            for item, prob in probs.items()
+            for probability in probabilities
         }
-        assert len(likelihoods) > 0, f"Likelihoods empty! {output}"
+
         return likelihoods
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        # Query LLM
-        prompt = (
-            dedent("""
-            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {target_item}.
-            I will ask up to 20 questions and you should answer each one truthfully based on being X, by saying 'Yes' or 'No'.
-            ONLY ANSWER WITH YES OR NO.
-            Let us begin. Here is my question:
-            {question}
-            """)
-            .format(target_item=self.task_answer, question=current_node.question)
-            .strip()
-        )
+        prompt = dedent(f"""\
+            You are a player of the 20 Questions game. Your goal is to impersonate the secret entity, X. X is {self.task_answer}.
+            I will ask up to 20 questions and you should answer each one truthfully based on being X.
+
+            ### Instructions
+            - Answer truthfully based on what X is.  
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - Do not add extra text or commentary. Return exactly one of the options.
+
+            ### Question
+            "{current_node.question}"
+            """).strip()
 
         output = await query_llm(prompt, self.answerer_session)
-
-        # Parse LLM
-        llm_answer = output.strip().lower()
-        for child in current_node.children:
-            if child.answer.lower() in llm_answer:
-                return child
-
-        raise RuntimeError(
-            f"No matching answer selected for '{current_node.question}'. Possible answers: {list(child.answer for child in current_node.children)}, Given answer: {llm_answer}"
-        )
+        return parse_answer(output, current_node)

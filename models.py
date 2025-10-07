@@ -88,6 +88,11 @@ llm_models: dict[str, dict] = {
         "model_name": "openai/gpt-oss-20b",
         "params": {"reasoning_effort": "low"},
     },
+    "gpt_5": {
+        "client": _openai_client,
+        "model_name": "gpt-5",
+        "params": {},
+    },
     "dummy": {
         "client": None,
         "model_name": "dummy",
