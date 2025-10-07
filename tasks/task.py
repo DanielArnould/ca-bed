@@ -72,7 +72,9 @@ class Question:
 
 
 def parse_questions(output: str) -> list[Question]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)[\|;](.+?)(?=(?:\d+\.|$))", re.DOTALL)
+    pattern = re.compile(
+        r"(\d+)\.\s*(.+?)[\|;](.+?)(?=(?:\n\d+\.|$))", re.MULTILINE | re.DOTALL
+    )
     matches = pattern.findall(output)
 
     allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
@@ -97,7 +99,7 @@ def parse_questions(output: str) -> list[Question]:
 
 
 def parse_binary_questions(output: str) -> list[Question]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\d+\.|$))", re.DOTALL)
+    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\n\d+\.|$))", re.MULTILINE | re.DOTALL)
     matches = pattern.findall(output)
 
     allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")

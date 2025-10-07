@@ -51,6 +51,7 @@ class Direct(DirectPromptingTask):
                    
             Your goal is to identify the correct disease.
             You can either ask a question to gather more information, or you can make a prediction.
+            You must only ask questions that can be answered by only 'Yes' or 'No'
             
             If you are confident enough to make a prediction, output:
             [PREDICTION]: <This should ONLY be the exact name of the disease from the list of possible diseases>
@@ -75,7 +76,7 @@ class Direct(DirectPromptingTask):
         if len(history) >= 0.7 * self.max_conversation_depth:
             parts.append(
                 dedent("""
-                Now you should make predicitions instead of asking questions
+                Now you should make predictions instead of asking questions
                 """).strip()
             )
 
@@ -102,11 +103,12 @@ class Direct(DirectPromptingTask):
             dedent(f"""\
             You are a patient experiencing {self.instance.disease}. You self-reported that: {self.instance.self_report}.
             I am your doctor and I will ask you questions about your condition.  
-            
+
             ### Instructions
-            - Answer the doctor's question in character.
-            - Stay consistent with your task and story.
-            - Limit your response to 1 sentence only.
+            - Answer truthfully based on your symptoms.  
+            - Review the available options before responding.  
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question
             "{question}"

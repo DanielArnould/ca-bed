@@ -77,6 +77,7 @@ class BayesianWithMultibranching(Task):
         return {prior.hypothesis: prior.probability for prior in priors}
 
     @override
+    @retry(stop=stop_after_attempt(2))
     async def create_questions(
         self, current_node: EvidenceNode
     ) -> dict[str, list[str]]:
@@ -120,7 +121,7 @@ class BayesianWithMultibranching(Task):
             dedent(f"""
                 Your task is to generate {self.max_question_nodes} *excellent* questions to ask next, along with a list of possible answers.
                 The best questions are those that will help distinguish between these likely possibilities.
-                Format your response in this structure:
+                Format your response in this structure, AND ONLY THIS STRUCTURE:
                 1. <Question 1>|Answer1;Answer2;Answer3
                 2. <Question 2>|Answer1;Answer2
                 ...
@@ -179,11 +180,16 @@ class BayesianWithMultibranching(Task):
         # Query LLM
         output = await query_llm(prompt, self.questioner_session)
         likelihoods = parse_likelihoods(output)
+
+        uniform_prob = 1 / len(answers)
+
         return {
-            likelihood.hypothesis: {
-                ans: prob
-                for ans, prob in zip(answers, likelihood.likelihoods, strict=True)
-            }
+            likelihood.hypothesis: (
+                {ans: prob for ans, prob in zip(answers, likelihood.likelihoods)}
+                if len(likelihood.likelihoods) == len(answers)
+                # Fallback to uniform if poorly formatted
+                else {ans: uniform_prob for ans in answers}
+            )
             for likelihood in likelihoods
         }
 
