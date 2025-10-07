@@ -100,8 +100,9 @@ class Direct(DirectPromptingTask):
             I will ask up to 20 questions and you should answer each one truthfully based on being X.
 
             ### Instructions
-            - Answer truthfully based on what X is.  
-            - Limit your response to 1 sentence only.
+            - Answer truthfully based on what X is.
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
+            - Do not add extra text or commentary. Return exactly one of the options.
 
             ### Question
             "{question}"
