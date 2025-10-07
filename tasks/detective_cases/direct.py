@@ -151,7 +151,7 @@ class Direct(DirectPromptingTask):
             - Answer the detective's question in character as {suspect_name}.
             - Stay consistent with your task and story.
             - You may lie, evade, or tell the truth depending on what seems natural for this suspect.
-            - Limit your response to 1 sentence only.
+            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
 
             ### Detective's Question
             "{actual_question}"
