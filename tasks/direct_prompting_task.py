@@ -15,6 +15,11 @@ class Question:
     value: str
 
 
+@dataclass
+class Recommendations:
+    values: tuple[str, ...]
+
+
 class DirectPromptingTask(ABC):
     questioner_session: LLMRequestSession
     answerer_session: LLMRequestSession
@@ -39,7 +44,7 @@ class DirectPromptingTask(ABC):
     @abstractmethod
     async def query_questioner(
         self, current_node: EvidenceNode
-    ) -> Question | Prediction:
+    ) -> Question | Prediction | Recommendations:
         pass
 
     @abstractmethod
