@@ -88,7 +88,7 @@ class Direct(DirectPromptingTask):
             dedent("""\
             ### Task
             Your goal is to identify the correct culprit.
-            You can either ask a question to a specific suspect to gather more information,
+            You can either ask a 'Yes' or 'No' question to a specific suspect to gather more information,
             or you can make a prediction.
                    
             ### Response Format
