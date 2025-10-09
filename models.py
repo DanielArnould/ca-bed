@@ -55,8 +55,8 @@ llm_models: dict[str, dict] = {
     },
     "deepseek_together_ai": {
         "client": _together_client,
-        "model_name": "deepseek-ai/DeepSeek-V3.1",
-        "params": {},
+        "model_name": "DeepSeek-AI/DeepSeek-V3-2-Exp",
+        "params": {"temperature": 0},
     },
     "gpt_4o_mini": {
         "client": _openai_client,
@@ -87,6 +87,11 @@ llm_models: dict[str, dict] = {
         "client": _together_client,
         "model_name": "openai/gpt-oss-20b",
         "params": {"reasoning_effort": "low"},
+    },
+    "gpt_oss_120b": {
+        "client": _together_client,
+        "model_name": "openai/gpt-oss-120b",
+        "params": {"reasoning_effort": "medium", "temperature": 0.0},
     },
     "gpt_5": {
         "client": _openai_client,
