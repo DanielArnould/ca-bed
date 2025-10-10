@@ -167,8 +167,8 @@ class Bayesian(Task):
             n. <Question n>
 
             ### Example
-            1. [Alice] Were you outside at 12:00PM? 
-            2. [Bob] Did you have access to the murder weapon?
+            1. [Mr. Jones] Were you outside at 12:00PM? 
+            2. [Dr. Otto] Did you have access to the murder weapon?
             """).strip()
         )
 
