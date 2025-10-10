@@ -151,7 +151,8 @@ def calculate_posterior(
     uniform_likelihood: float,
 ) -> tuple[dict[str, float], float]:
     all_posteriors = {
-        h: p * likelihoods.get(h, uniform_likelihood) for h, p in prior.items()
+        h: p * min(max((likelihoods.get(h, uniform_likelihood) ** 0.5), 0.01), 0.99)
+        for h, p in prior.items()
     }
 
     # Warn for missing likelihoods
