@@ -69,7 +69,7 @@ class Direct(DirectPromptingTask):
             )
 
         # Targetting prompt
-        if len(history) >= 0.7 * self.max_conversation_depth:
+        if len(history) >= self.max_conversation_depth - 3:
             parts.append(
                 dedent("""
                 Now you should make predicitions instead of asking questions
