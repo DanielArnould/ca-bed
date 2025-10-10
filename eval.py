@@ -101,25 +101,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--questioner-input-price",
         type=float,
-        default=0.05,
+        default=0.28,
         help="Questioner input token price per 1M tokens",
     )
     parser.add_argument(
         "--questioner-output-price",
         type=float,
-        default=0.2,
+        default=0.48,
         help="Questioner output token price per 1M tokens",
     )
     parser.add_argument(
         "--answerer-input-price",
         type=float,
-        default=0.05,
+        default=0.28,
         help="Answerer input token price per 1M tokens",
     )
     parser.add_argument(
         "--answerer-output-price",
         type=float,
-        default=0.2,
+        default=0.48,
         help="Answerer output token price per 1M tokens",
     )
     args = parser.parse_args()
