@@ -143,7 +143,7 @@ def parse_likelihoods(output: str) -> list[Likelihood]:
     for hypothesis, probs_text in matches:
         sanitised_hypothesis = sanitise(hypothesis)
         probs = [
-            max(min(float(p.strip()), 1 - 1e-10), 1e-10)
+            max(min(float(p.strip()), 1 - 0.01), 0.01)
             for p in probs_text.split(";")
             if p.strip()
         ]
@@ -210,7 +210,7 @@ def parse_categorical_likelihoods(
             ]
 
             # Clamp and normalise
-            clamped = [max(min(val, 1 - 1e-10), 1e-10) for val in raw_vector]
+            clamped = [max(min(val, 1 - 0.01), 0.01) for val in raw_vector]
             total = sum(clamped)
             normalised = [val / total for val in clamped] if total > 0 else clamped
 
@@ -246,7 +246,7 @@ def parse_probabilities(output: str) -> list[Probability]:
     probabilities = []
     for hypothesis, prob_text in matches:
         sanitised_hypothesis = sanitise(hypothesis)
-        probability = max(min(float(prob_text.strip()), 1 - 1e-10), 1e-10)
+        probability = max(min(float(prob_text.strip()), 1 - 0.01), 0.01)
         probabilities.append(
             Probability(hypothesis=sanitised_hypothesis, probability=probability)
         )
