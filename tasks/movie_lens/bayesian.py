@@ -71,7 +71,7 @@ class Bayesian(Task):
         parts.append(
             dedent(
                 f"""\
-                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist.
+                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist consisting of 10 movies.
 
                 ### Candidate Films
                 {self._candidate_block}
@@ -116,7 +116,7 @@ class Bayesian(Task):
             dedent(
                 f"""
                 Your task is to generate {self.max_question_nodes} excellent YES/NO questions to ask the user next.
-                The best questions help you learn their tastes from scratch and sharply distinguish between the remaining candidate films using concrete cinematic traits, plot points, themes, or tonal qualities.
+                Remember, the goal is to recommend 10 films from the candidate list. The questions should help you understand the user's preferences better, not narrow down to a single film.
 
                 Format your response exactly as:
                 1. <Question 1>
@@ -140,7 +140,7 @@ class Bayesian(Task):
     ) -> dict[str, dict[str, float]]:
         prompt = dedent(
             f"""\
-            You are estimating how likely a user would answer "Yes" to a question if each film below ended up being your final recommendation.
+            You are estimating how likely a user would answer "Yes" to a question if each film below ended up being in your final 10 recommendations.
 
             ### Candidate Films
             {self._candidate_block}
@@ -149,7 +149,7 @@ class Bayesian(Task):
             "{question}"
 
             ### Task
-            - For each film, assume it is the correct recommendation for the user.
+            - For each film, assume it is the correct recommendation for the user (part of the final 10 recommendations).
             - Estimate the probability (0.0 to 1.0) that the user would answer "Yes".
             - Probabilities must be rounded to two decimals.
             - Use only the exact film titles.

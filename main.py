@@ -140,7 +140,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+    output_dir = Path(f"logs/movies_by_deepseek32_deepseekr1/")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
