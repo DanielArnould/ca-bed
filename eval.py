@@ -1,4 +1,3 @@
-import re
 from collections import Counter
 from pathlib import Path
 from textwrap import dedent
@@ -8,6 +7,7 @@ from history import RunRecord
 from models import LLMRequestSession, query_llm
 from tasks.movie_lens.common import PersonaContext, format_persona_context
 
+import json
 
 class RunEval(TypedDict):
     top1: bool
@@ -36,6 +36,9 @@ class MovieLensEval(TypedDict):
     mean_rating: float | None
     missing_titles: tuple[str, ...]
     raw_response: str
+    questioner_session: LLMRequestSession
+    answerer_session: LLMRequestSession
+    eval_session: LLMRequestSession
 
 
 class MovieLensGroupEval(TypedDict):
@@ -46,6 +49,12 @@ class MovieLensGroupEval(TypedDict):
     overall_mean_rating: float | None
     mean_mean_rating: float | None
     missing_titles: dict[str, int]
+    questioner_input_tokens: int
+    questioner_output_tokens: int
+    answerer_input_tokens: int
+    answerer_output_tokens: int
+    eval_input_tokens: int
+    eval_output_tokens: int
 
 
 def get_run_eval(run_history: RunRecord) -> RunEval:
@@ -103,10 +112,6 @@ def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
         "answerer_output_tokens": answerer_output_tokens,
     }
 
-
-_RATING_LINE_PATTERN = re.compile(r"\d+\.\s*([^|]+)\|([^\n]+)")
-
-
 def _select_top_titles(
     belief_state: dict[str, float], limit: int
 ) -> tuple[str, ...]:
@@ -121,42 +126,33 @@ def _select_top_titles(
 def _parse_rating_response(
     response: str, expected_titles: Sequence[str]
 ) -> dict[str, float]:
-    matches = _RATING_LINE_PATTERN.findall(response)
-    if not matches:
-        raise ValueError(
-            "Could not locate numbered Title|Score ratings in evaluation response"
-        )
-
-    lookup = {title.casefold(): title for title in expected_titles}
-    ratings: dict[str, float] = {}
-
-    for raw_title, raw_score in matches:
-        title = raw_title.strip().strip('"\'' "\u201c\u201d")
-        score_text = raw_score.strip()
-
-        if not title or not score_text:
-            continue
-
-        mapped = lookup.get(title.casefold())
-        if mapped is None or mapped in ratings:
-            continue
-
-        score_match = re.search(r"[-+]?\d+(?:\.\d+)?", score_text)
-        if not score_match:
-            continue
-
-        numeric = float(score_match.group(0))
-        ratings[mapped] = numeric
-
-    return ratings
+    return json.loads(response)
 
 
 def get_movielens_group_eval(
-    movie_evals: Sequence[MovieLensEval],
+    movie_evals: list[MovieLensEval],
 ) -> MovieLensGroupEval:
     total_expected = sum(len(movie_eval["recommendations"]) for movie_eval in movie_evals)
     total_captured = sum(len(movie_eval["ratings"]) for movie_eval in movie_evals)
-    coverage = total_captured / total_expected if total_expected else 0.0
+
+    total_questioner_input_tokens = sum(
+        movie_eval["questioner_session"].total_input_tokens for movie_eval in movie_evals
+    )
+    total_questioner_output_tokens = sum(
+        movie_eval["questioner_session"].total_output_tokens for movie_eval in movie_evals
+    )
+    total_answerer_input_tokens = sum(
+        movie_eval["answerer_session"].total_input_tokens for movie_eval in movie_evals
+    )
+    total_answerer_output_tokens = sum(
+        movie_eval["answerer_session"].total_output_tokens for movie_eval in movie_evals
+    )
+    total_eval_input_tokens = sum(
+        movie_eval["eval_session"].total_input_tokens for movie_eval in movie_evals
+    )
+    total_eval_output_tokens = sum(
+        movie_eval["eval_session"].total_output_tokens for movie_eval in movie_evals
+    )
 
     all_scores: list[float] = []
     mean_scores: list[float] = []
@@ -177,10 +173,14 @@ def get_movielens_group_eval(
         "num_runs": len(movie_evals),
         "expected_ratings": total_expected,
         "captured_ratings": total_captured,
-        "rating_coverage": round(coverage, 3),
         "overall_mean_rating": overall_mean,
         "mean_mean_rating": mean_of_means,
-        "missing_titles": dict(sorted(missing_counter.items())),
+        "questioner_input_tokens": total_questioner_input_tokens,
+        "questioner_output_tokens": total_questioner_output_tokens,
+        "answerer_input_tokens": total_answerer_input_tokens,
+        "answerer_output_tokens": total_answerer_output_tokens,
+        "eval_input_tokens": total_eval_input_tokens,
+        "eval_output_tokens": total_eval_output_tokens,
     }
 
 
@@ -192,15 +192,6 @@ async def get_movielens_eval(
 ) -> MovieLensEval:
     top_titles = _select_top_titles(run_history.final_belief_state, max_recommendations)
 
-    if not top_titles:
-        return {
-            "recommendations": tuple(),
-            "ratings": {},
-            "mean_rating": None,
-            "missing_titles": tuple(),
-            "raw_response": "",
-        }
-
     persona_block = format_persona_context(persona)
     movies_block = "\n".join(
         f"{idx}. {title}" for idx, title in enumerate(top_titles, start=1)
@@ -208,7 +199,7 @@ async def get_movielens_eval(
 
     prompt = dedent(
         f"""\
-        You are scoring how well a recommendation list suits a specific movie-goer persona.
+        You are evaluating how well a recommendation list matches a specific movie-goer persona so a reviewer can see which titles truly fit.
 
         ### Persona Briefing
         {persona_block}
@@ -216,46 +207,47 @@ async def get_movielens_eval(
         ### Candidate Films
         {movies_block}
 
-        Rate each candidate film for this persona from 1 (terrible fit) to 5 (perfect fit).
-        You may use half-point increments. Base your score on the persona's tastes, motifs,
-        aversions, and reference favourites/dislikes. If you are uncertain about a film,
-        make the best informed estimate.
+        Consider the persona's stated likes, dislikes, motifs, and reference titles. Reward close matches, penalise strong aversions, and prefer variety over near-duplicates. If you lack enough information for a film, give the best informed estimate.
 
-        ### Response Format
-        One line per film:
-        1. <Exact Title>|<score>
-        2. <Exact Title>|<score>
-        ...
-        {len(top_titles)}. <Exact Title>|<score>
+        ### Rating Scale
+        0 (terrible fit) to 5 (perfect fit). Half-point increments are allowed.
 
-        Use each listed title exactly once, matching its spelling (including release details), and provide only the numbered lines—no commentary or extra text.
+        ### Response Format (JSON)
+        {{
+            "movie 1 (1999)": 4.5,
+            "movie 2 (1992)": 3,
+            ...
+            "movie {max_recommendations} (1970)": 2
+        }}
+
+        Use each listed title exactly once, keep the original order, match the spelling (including release details), and return only the JSON object—no commentary or code fences.
         """
     ).strip()
 
     response = await query_llm(prompt, evaluation_session)
-
     ratings = _parse_rating_response(response, top_titles)
-
     missing = tuple(title for title in top_titles if title not in ratings)
     mean_rating = (
-        round(sum(ratings.values()) / max_recommendations, 3)
+        round(sum(ratings.values()) / len(top_titles), 3)
         if ratings
-        else None
+        else 0
     )
 
-    return MovieLensEval(**{
+    return {
         "recommendations": top_titles,
         "ratings": ratings,
         "mean_rating": mean_rating,
         "missing_titles": missing,
         "raw_response": response,
-    })
+        "questioner_session": run_history.questioner_session,
+        "answerer_session": run_history.answerer_session,
+        "eval_session": evaluation_session
+    }
 
 if __name__ == "__main__":
     import argparse
     from pathlib import Path
     from history import deserialise_run_record
-    import json
     from tqdm import tqdm
     import polars as pl
     from tasks.movie_lens.data import load_balanced_dataset
@@ -274,25 +266,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--questioner-input-price",
         type=float,
-        default=0.05,
+        default=0.28,
         help="Questioner input token price per 1M tokens",
     )
     parser.add_argument(
         "--questioner-output-price",
         type=float,
-        default=0.2,
+        default=0.42,
         help="Questioner output token price per 1M tokens",
     )
     parser.add_argument(
         "--answerer-input-price",
         type=float,
-        default=0.05,
+        default=0.28,
         help="Answerer input token price per 1M tokens",
     )
     parser.add_argument(
         "--answerer-output-price",
         type=float,
-        default=0.2,
+        default=0.42,
         help="Answerer output token price per 1M tokens",
     )
     args = parser.parse_args()
@@ -316,9 +308,21 @@ if __name__ == "__main__":
                 with path.open("r", encoding="utf-8") as f:
                     run_record = deserialise_run_record(json.load(f))
                 run_evals.append(await get_movielens_eval(run_record, movies[i].persona, eval_session))
-            results.append(get_movielens_group_eval(run_evals))
+            
+            group_eval = get_movielens_group_eval(run_evals)
+            cost = {
+                "questioner_input_price": (questioner_input_price / 1_000_000) * group_eval['questioner_input_tokens'],
+                "questioner_output_price": (questioner_output_price / 1_000_000) * group_eval['questioner_output_tokens'],
+                "answerer_input_price": (answerer_input_price / 1_000_000) * group_eval['answerer_input_tokens'],
+                "answerer_output_price": (answerer_output_price / 1_000_000) * group_eval['answerer_output_tokens'],
+                "eval_input_price": (1.25 / 1_000_000) * group_eval['eval_input_tokens'],
+                "eval_output_price": (10 / 1_000_000) * group_eval['eval_output_tokens'],
+            }
+        
+            results.append({**group_eval, **cost})
 
         df = pl.DataFrame(results)
+        df.write_csv('movies_eval.csv')
 
         print("\n" + "=" * 100)
         print("EXPERIMENT COMPARISON TABLE")

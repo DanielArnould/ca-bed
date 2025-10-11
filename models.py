@@ -53,10 +53,15 @@ llm_models: dict[str, dict] = {
         "model_name": "deepseek-reasoner",
         "params": {},
     },
+    "deepseek_r1": {
+        "client": _deepseek_client,
+        "model_name": "deepseek-reasoner",
+        "params": {},
+    },
     "deepseek_together_ai": {
         "client": _together_client,
         "model_name": "DeepSeek-AI/DeepSeek-V3-2-Exp",
-        "params": {"temperature": 0},
+        "params": {},
     },
     "gpt_4o_mini": {
         "client": _openai_client,
@@ -91,7 +96,7 @@ llm_models: dict[str, dict] = {
     "gpt_oss_120b": {
         "client": _together_client,
         "model_name": "openai/gpt-oss-120b",
-        "params": {"reasoning_effort": "medium", "temperature": 0.0},
+        "params": {"reasoning_effort": "medium"},
     },
     "gpt_5": {
         "client": _openai_client,
@@ -132,6 +137,9 @@ async def query_llm(input_text: str, session: LLMRequestSession) -> str:
     model_name: str = model_config["model_name"]
     extra_params: dict = model_config["params"]
 
+    if model_name != 'gpt-5':
+        extra_params['temperature'] = 0
+
     if client is None:
         raise RuntimeError(f"No API client configured for model: {session.model_key}")
 
@@ -141,8 +149,6 @@ async def query_llm(input_text: str, session: LLMRequestSession) -> str:
         model=model_name,
         messages=[{"role": "user", "content": input_text}],
         stream=False,
-        # max_tokens=max_tokens,
-        temperature=0.0,
         **extra_params,  # type: ignore
     )
 
