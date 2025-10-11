@@ -1,10 +1,10 @@
-import re
 from textwrap import dedent
 from typing import override
 
 from tenacity import retry, stop_after_attempt
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, QuestionNode, get_conversation_history
+from tasks.detective_cases.common import get_case_background, parse_question
 from tasks.detective_cases.data import DetectiveCasesInstance
 from tasks.task import (
     Task,
@@ -63,7 +63,7 @@ class Baseline(Task):
             You will take on the role of a detective tasked with finding the real murderer in this case.
 
             ### Case Background
-            {self.get_case_background()}
+            {get_case_background(self.instance)}
 
             The investigation focuses on {len(self.hypothesis_space)} suspects, one of whom is the true murderer:
             {suspects_info}
@@ -101,7 +101,7 @@ class Baseline(Task):
             You are a detective investigating a murder.  
 
             ### Case Background
-            {self.get_case_background()}
+            {get_case_background(self.instance)}
             """).strip()
         )
 
@@ -180,7 +180,7 @@ class Baseline(Task):
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
-        answerer_name, actual_question = self.parse_question(question)
+        answerer_name, actual_question = parse_question(self.hypothesis_space, question)
 
         suspects = [s for s in self.instance["suspects"] if s["name"] in hypotheses]
         assert len(suspects) > 0, f"No matching suspect found in question: {question}"
@@ -199,7 +199,7 @@ class Baseline(Task):
             You are a detective investigating a murder case.
 
             ### Case Background
-            {self.get_case_background()}
+            {get_case_background(self.instance)}
 
             ### Suspects
             {suspects_info}
@@ -247,7 +247,9 @@ class Baseline(Task):
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        suspect_name, question = self.parse_question(current_node.question)
+        suspect_name, question = parse_question(
+            self.hypothesis_space, current_node.question
+        )
 
         suspect = next(
             (s for s in self.instance["suspects"] if s["name"] == suspect_name),
@@ -276,21 +278,3 @@ class Baseline(Task):
 
         output = await query_llm(prompt, self.answerer_session)
         return parse_answer(output, current_node)
-
-    def get_case_background(self) -> str:
-        return dedent(f"""\
-            Time: {self.instance["time"]}
-            Location: {self.instance["location"]}
-            Victim:
-            - Name: {self.instance["victim"]["name"]}
-            - Introduction: {self.instance["victim"]["introduction"]}
-            - Cause of Death: {self.instance["victim"]["cause_of_death"]}
-            - Murder Weapon: {self.instance["victim"]["murder_weapon"]}
-        """)
-
-    def parse_question(self, question: str) -> tuple[str, str]:
-        suspect_match = re.match(r"\[(.*?)\]\s*(.*)", question)
-        assert suspect_match, f"Bad question: {question}"
-        suspect_name, actual_question = suspect_match.groups()
-        assert suspect_name in self.hypothesis_space, f"Unrecognised: {suspect_name}"
-        return suspect_name, actual_question

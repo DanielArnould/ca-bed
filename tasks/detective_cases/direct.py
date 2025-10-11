@@ -4,6 +4,7 @@ from typing import override
 
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, get_conversation_history
+from tasks.detective_cases.common import get_case_background, parse_question
 from tasks.detective_cases.data import DetectiveCasesInstance
 from tasks.direct_prompting_task import (
     DirectPromptingTask,
@@ -50,7 +51,7 @@ class Direct(DirectPromptingTask):
             You are a detective investigating a murder.  
 
             ### Case Background
-            {self.get_case_background()}
+            {get_case_background(self.instance)}
             """).strip()
         )
 
@@ -88,8 +89,9 @@ class Direct(DirectPromptingTask):
             dedent("""\
             ### Task
             Your goal is to identify the correct culprit.
-            You can either ask a 'Yes' or 'No' question to a specific suspect to gather more information,
-            or you can make a prediction.
+            You can either ask a question to a specific suspect to gather more information,
+            or you can make a prediction. If you ask a question, it MUST only be answerable
+            by either a 'Yes' or 'No'.
                    
             ### Response Format
             If you are confident enough to make a prediction, output:
@@ -122,7 +124,9 @@ class Direct(DirectPromptingTask):
             r"\[(PREDICTION|ANSWER|PREDECTION)\]:\s*(.*)", output, re.IGNORECASE
         )
 
-        if question_match and self.parse_question(question_match.group(1).strip()):
+        if question_match and parse_question(
+            self.hypothesis_space, question_match.group(1).strip()
+        ):
             return Question(question_match.group(1).strip())
         elif prediction_match:
             return Prediction(prediction_match.group(2).strip())
@@ -131,7 +135,7 @@ class Direct(DirectPromptingTask):
 
     @override
     async def query_answerer(self, question: str) -> str:
-        suspect_name, actual_question = self.parse_question(question)
+        suspect_name, actual_question = parse_question(self.hypothesis_space, question)
 
         suspect = next(
             (s for s in self.instance["suspects"] if s["name"] == suspect_name),
@@ -158,33 +162,3 @@ class Direct(DirectPromptingTask):
         """)
 
         return await query_llm(prompt, self.answerer_session)
-
-    def get_case_background(self) -> str:
-        return dedent(f"""\
-            Time: {self.instance["time"]}
-            Location: {self.instance["location"]}
-            Victim:
-            - Name: {self.instance["victim"]["name"]}
-            - Introduction: {self.instance["victim"]["introduction"]}
-            - Cause of Death: {self.instance["victim"]["cause_of_death"]}
-            - Murder Weapon: {self.instance["victim"]["murder_weapon"]}
-        """)
-
-    def parse_question(self, question: str) -> tuple[str, str]:
-        suspect_match = re.match(r"\[(.*?)\]\s*(.*)", question)
-
-        # Fallback to finding first name in string
-        if not suspect_match:
-            for name in self.hypothesis_space:
-                if name in question:
-                    parts = question.split(name, 1)
-                    before, after = parts if len(parts) == 2 else ("", parts[0])
-                    suspect_name = name
-                    actual_question = (after or before).strip()
-                    return suspect_name, actual_question
-
-            assert False, f"Bad question: {question}"
-
-        suspect_name, actual_question = suspect_match.groups()
-        assert suspect_name in self.hypothesis_space, f"Unrecognised: {suspect_name}"
-        return suspect_name, actual_question
