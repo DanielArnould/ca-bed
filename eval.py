@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import TypedDict
 
 from history import RunRecord
-from models import LLMRequestSession
 
 import json
 
@@ -87,9 +86,6 @@ if __name__ == "__main__":
     from history import deserialise_run_record
     from tqdm import tqdm
     import polars as pl
-    from tasks.movie_lens.data import load_balanced_dataset
-
-    movies = load_balanced_dataset(fraction=0.25)
 
     parser = argparse.ArgumentParser(prog="Experiment evaluator")
     parser.add_argument(

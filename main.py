@@ -20,7 +20,8 @@ from tasks.direct_prompting_task import DirectPromptingTask
 # from tasks.med_dg.data import load_balanced_data
 # from tasks.med_dg.direct import Direct
 from tasks.movie_lens.bayesian import Bayesian
-from tasks.movie_lens.data import load_balanced_dataset
+from tasks.movie_lens.direct import Direct
+from tasks.movie_lens.data import load_dataset
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -31,22 +32,28 @@ async def main(output_dir: Path) -> None:
     questioner_model_key = "deepseek_chat"
     answerer_model_key = "deepseek_reasoner"
     sharpness_constant = 0.4
-    min_probability = 0
-    max_concurrent = 1
+    min_probability = 0.001
+    max_concurrent = 8
     clustering_threshold = 0.99
     shared_question_cluster = True
-    dataset = load_balanced_dataset(fraction=0.25)
+    dataset = load_dataset(fraction=0.25, personas_per_instance=5)
     start_idx = 0
 
     tasks = [
-        Bayesian(
+        # Bayesian(
+        #     questioner_session=LLMRequestSession(questioner_model_key),
+        #     answerer_session=LLMRequestSession(answerer_model_key),
+        #     instance=item,
+        #     max_question_nodes=3,
+        #     max_lookahead_depth=3,
+        #     max_conversation_depth=15,
+        #     confidence_threshold=0.7
+        # )
+        Direct(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
-            max_question_nodes=3,
-            max_lookahead_depth=3,
-            max_conversation_depth=5,
-            confidence_threshold=1
+            max_conversation_depth=15
         )
         for item in dataset[start_idx:]
     ]
@@ -61,22 +68,22 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            run_tree_based_task(
-                idx=i,
-                task=task,
-                output_dir=output_dir,
-                semaphore=semaphore,
-                sharpness_constant=sharpness_constant,
-                min_probability=min_probability,
-                question_clustering=(
-                    shared_clustering
-                    if shared_question_cluster
-                    else QuestionClustering(clustering_threshold)
-                ),  # type: ignore
-            )
-            # run_direct_prompting_task(
-            #     idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            # run_tree_based_task(
+            #     idx=i,
+            #     task=task,
+            #     output_dir=output_dir,
+            #     semaphore=semaphore,
+            #     sharpness_constant=sharpness_constant,
+            #     min_probability=min_probability,
+            #     question_clustering=(
+            #         shared_clustering
+            #         if shared_question_cluster
+            #         else QuestionClustering(clustering_threshold)
+            #     ),  # type: ignore
             # )
+            run_direct_prompting_task(
+                idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            )
             for i, task in enumerate(tasks, start=start_idx)
         ]
     )
@@ -141,7 +148,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/movies_by_deepseek32_deepseekr1/")
+    output_dir = Path(f"logs/moviesinv_dp50_deepseek32_deepseekr1/")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -153,3 +160,16 @@ if __name__ == "__main__":
         force=True,
     )
     asyncio.run(main(output_dir))
+    # questioner_model_key = "deepseek_chat"
+    # answerer_model_key = "deepseek_reasoner"
+    # data = load_dataset(personas_per_instance=10)
+    # task = Bayesian(
+    #     questioner_session=LLMRequestSession(questioner_model_key),
+    #     answerer_session=LLMRequestSession(answerer_model_key),
+    #     instance=data[0],
+    #     max_question_nodes=3,
+    #     max_lookahead_depth=3,
+    #     max_conversation_depth=5,
+    #     confidence_threshold=1
+    # )
+    # print(task._questioner_preamble)
