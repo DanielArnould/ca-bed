@@ -151,7 +151,7 @@ if __name__ == "__main__":
             "answerer_output_price": (answerer_output_price / 1_000_000) * group_eval['answerer_output_tokens'],
         }
     
-        results.append({**group_eval, **cost})
+        results.append({"experiment": dir_path.as_posix().split("/")[-1], **group_eval})
 
     df = pl.DataFrame(results)
     df.write_csv(args.output_file)

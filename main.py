@@ -23,9 +23,12 @@ from tasks.direct_prompting_task import DirectPromptingTask
 # from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
 # from tasks.med_dg.data import load_balanced_data
 # from tasks.med_dg.direct import Direct
-from tasks.movie_lens.bayesian import Bayesian
-from tasks.movie_lens.direct import Direct
-from tasks.movie_lens.data import load_dataset
+# from tasks.movie_lens.bayesian import Bayesian
+# from tasks.movie_lens.direct import Direct
+# from tasks.movie_lens.data import load_dataset
+from tasks.twenty_questions.bayesian_logprobs import BayesianLogProbs
+from tasks.twenty_questions.bayesian import Bayesian
+from tasks.twenty_questions.data import COMMON as entities
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -40,26 +43,29 @@ async def main(output_dir: Path) -> None:
     max_concurrent = 8
     clustering_threshold = 0.99
     shared_question_cluster = True
-    dataset = load_dataset(fraction=0.25, personas_per_instance=5)
+    dataset = entities
     start_idx = 0
+    end_idx = len(entities)
+    conversation_depth = 20
 
     tasks = [
-        # Bayesian(
+        BayesianLogProbs(
+            questioner_session=LLMRequestSession(questioner_model_key),
+            answerer_session=LLMRequestSession(answerer_model_key),
+            task_answer=item,
+            max_question_nodes=3,
+            max_lookahead_depth=3,
+            max_conversation_depth=conversation_depth,
+            confidence_threshold=0.7,
+            hypothesis_space=entities
+        )
+        # Direct(
         #     questioner_session=LLMRequestSession(questioner_model_key),
         #     answerer_session=LLMRequestSession(answerer_model_key),
         #     instance=item,
-        #     max_question_nodes=3,
-        #     max_lookahead_depth=3,
-        #     max_conversation_depth=15,
-        #     confidence_threshold=0.7
+        #     max_conversation_depth=conversation_depth
         # )
-        Direct(
-            questioner_session=LLMRequestSession(questioner_model_key),
-            answerer_session=LLMRequestSession(answerer_model_key),
-            instance=item,
-            max_conversation_depth=15
-        )
-        for item in dataset[20:40]
+        for item in dataset[start_idx:end_idx]
     ]
 
     # =============== EXECUTION ===============
@@ -76,22 +82,22 @@ async def main(output_dir: Path) -> None:
 
     await asyncio.gather(
         *[
-            # run_tree_based_task(
-            #     idx=i,
-            #     task=task,
-            #     output_dir=output_dir,
-            #     semaphore=semaphore,
-            #     sharpness_constant=sharpness_constant,
-            #     min_probability=min_probability,
-            #     question_clustering=(
-            #         shared_clustering
-            #         if shared_question_cluster
-            #         else QuestionClustering(clustering_threshold)
-            #     ),  # type: ignore
-            # )
-            run_direct_prompting_task(
-                idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            run_tree_based_task(
+                idx=i,
+                task=task,
+                output_dir=output_dir,
+                semaphore=semaphore,
+                sharpness_constant=sharpness_constant,
+                min_probability=min_probability,
+                question_clustering=(
+                    shared_clustering
+                    if shared_question_cluster
+                    else QuestionClustering(clustering_threshold)
+                ),  # type: ignore
             )
+            # run_direct_prompting_task(
+            #     idx=i, task=task, output_dir=output_dir, semaphore=semaphore
+            # )
             for i, task in enumerate(tasks, start=start_idx)
         ]
     )
@@ -156,7 +162,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/moviesinv_dp50_deepseek32_deepseekr1/")
+    output_dir = Path(f"logs/COMMON_by_logprobs_deepseek32_deepseekr1_test/")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -171,6 +177,7 @@ if __name__ == "__main__":
     # questioner_model_key = "deepseek_chat"
     # answerer_model_key = "deepseek_reasoner"
     # data = load_dataset(personas_per_instance=10)
+    # print(len(data))
     # task = Bayesian(
     #     questioner_session=LLMRequestSession(questioner_model_key),
     #     answerer_session=LLMRequestSession(answerer_model_key),
