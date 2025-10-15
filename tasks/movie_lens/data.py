@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import re
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from random import Random
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 DATA_PATH = Path(__file__).with_name("movielens_curated.json")
 DEFAULT_GROUP_SIZE = 4
 DEFAULT_SEED = 7342
-
+_ARTICLES_TO_PREFIX = ("The", "An", "A")
 
 @dataclass(frozen=True)
 class Movie:
@@ -109,16 +110,53 @@ def _build_instances(
 
         for preferred in persona.preferred_movies:
             movie_id = preferred.id
-            distractors = [
-                other
-                for other in personas
-                if other is not persona and not other.likes_movie(movie_id)
-            ]
+            distractors: list[tuple[float, float, PersonaRecord, bool]] = []
+            for other in personas:
+                if other is persona or other.likes_movie(movie_id):
+                    continue
+                score, is_red_herring = _compute_confusion_score(
+                    anchor=persona,
+                    candidate=other,
+                    target_movie=preferred,
+                )
+                jitter = rng.random() * 1e-3
+                distractors.append((score, jitter, other, is_red_herring))
+
             if len(distractors) < group_size - 1:
                 continue
 
-            selected = rng.sample(distractors, group_size - 1)
-            group = [persona, *selected]
+            distractors.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            shortlist_size = max(group_size * 3, 12)
+            top_candidates = distractors[:shortlist_size]
+
+            selected_personas: list[PersonaRecord] = []
+            red_herring_options = [
+                candidate
+                for _, _, candidate, is_red_herring in top_candidates
+                if is_red_herring
+            ]
+            if red_herring_options:
+                selected_personas.append(rng.choice(red_herring_options))
+
+            for _, _, candidate, _ in top_candidates:
+                if len(selected_personas) >= group_size - 1:
+                    break
+                if candidate in selected_personas:
+                    continue
+                selected_personas.append(candidate)
+
+            if len(selected_personas) < group_size - 1:
+                for _, _, candidate, _ in distractors:
+                    if len(selected_personas) >= group_size - 1:
+                        break
+                    if candidate in selected_personas:
+                        continue
+                    selected_personas.append(candidate)
+
+            if len(selected_personas) < group_size - 1:
+                continue
+
+            group = [persona, *selected_personas]
             rng.shuffle(group)
             target_index = group.index(persona)
 
@@ -132,6 +170,72 @@ def _build_instances(
             break
 
     return results
+
+
+def _compute_confusion_score(
+    *,
+    anchor: PersonaRecord,
+    candidate: PersonaRecord,
+    target_movie: RatedMovie,
+) -> tuple[float, bool]:
+    target_genres = set(target_movie.genres or ())
+    anchor_genres = set(anchor.shortlist_genres)
+    candidate_genres = set(candidate.shortlist_genres)
+    anchor_motifs = set(anchor.favorite_motifs)
+    candidate_motifs = set(candidate.favorite_motifs)
+    anchor_avoids = set(anchor.avoid_triggers)
+    candidate_avoids = set(candidate.avoid_triggers)
+
+    preferred_genres = _collect_genres(candidate.preferred_movies)
+    disliked_genres = _collect_genres(candidate.disliked_movies)
+
+    shared_genres = _jaccard_index(anchor_genres, candidate_genres)
+    shared_motifs = _jaccard_index(anchor_motifs, candidate_motifs)
+    shared_avoids = _jaccard_index(anchor_avoids, candidate_avoids)
+
+    target_shortlist_alignment = _overlap_ratio(target_genres, candidate_genres)
+    target_favourites_alignment = _overlap_ratio(target_genres, preferred_genres)
+    target_dislikes_conflict = _overlap_ratio(target_genres, disliked_genres)
+    target_avoid_conflict = _overlap_ratio(target_genres, candidate_avoids)
+
+    similarity = (
+        0.4 * shared_genres
+        + 0.3 * shared_motifs
+        + 0.2 * shared_avoids
+        + 0.4 * target_shortlist_alignment
+        + 0.3 * target_favourites_alignment
+    )
+    conflict = 0.4 * target_dislikes_conflict + 0.3 * target_avoid_conflict
+
+    confusion_score = similarity + 0.5 * conflict
+    is_red_herring = (
+        target_movie.id in candidate.disliked_movie_ids or conflict >= 0.2
+    )
+
+    return confusion_score, is_red_herring
+
+
+def _collect_genres(movies: Iterable[RatedMovie]) -> set[str]:
+    genres: set[str] = set()
+    for movie in movies:
+        genres.update(movie.genres or ())
+    return genres
+
+
+def _jaccard_index(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    union = left | right
+    if not union:
+        return 0.0
+    return len(left & right) / len(union)
+
+
+def _overlap_ratio(source: set[str], target: set[str]) -> float:
+    if not source or not target:
+        return 0.0
+    overlap = source & target
+    return len(overlap) / len(source)
 
 
 def _parse_personas(raw_personas: Sequence[Mapping[str, Any]]) -> tuple[PersonaRecord, ...]:
@@ -212,9 +316,10 @@ def _parse_rated_movie(raw_movie: Mapping[str, Any]) -> RatedMovie:
 
 
 def _parse_movie(raw_movie: Mapping[str, Any]) -> Movie:
+    title = _normalise_title(raw_movie.get("title"))
     return Movie(
         id=int(raw_movie["id"]),
-        title=str(raw_movie.get("title") or ""),
+        title=title or "",
         release_date=_ensure_str(raw_movie.get("release_date")),
         video_release_date=_ensure_str(raw_movie.get("video_release_date")),
         imdb_url=_ensure_str(raw_movie.get("imdb_url")),
@@ -225,6 +330,37 @@ def _parse_movie(raw_movie: Mapping[str, Any]) -> Movie:
 def _load_payload(path: Path) -> Mapping[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _normalise_title(title: str) -> str | None:
+    if not title:
+        return title
+
+    title = title.strip()
+    match = re.match(r"^(?P<body>.*?)(?P<year>\s*\(.*\))$", title)
+    if match:
+        body = match.group("body").rstrip()
+        year = match.group("year").strip()
+    else:
+        body = title
+        year = ""
+
+    for article in _ARTICLES_TO_PREFIX:
+        pattern = re.compile(rf",\s*({article})$", re.IGNORECASE)
+        found = pattern.search(body)
+        if not found:
+            continue
+
+        article_text = found.group(1)
+        body = pattern.sub("", body).strip()
+        if body:
+            normalised = f"{article_text.capitalize()} {body}"
+        else:
+            normalised = article_text.capitalize()
+
+        return f"{normalised} {year}".strip()
+
+    return title
 
 
 def _ensure_int(value: Any) -> int | None:

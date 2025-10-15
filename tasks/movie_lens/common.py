@@ -317,6 +317,8 @@ def _build_signature_section(
 def _build_summary_section(
     persona: PersonaContext, is_answerer: bool
 ) -> str | None:
+    if not is_answerer:
+        return None
     if persona.summary:
         return f"Summary: {persona.summary}"
     return None
@@ -331,16 +333,16 @@ def _build_genres_section(
 def _build_motifs_section(
     persona: PersonaContext, is_answerer: bool
 ) -> str | None:
-    # if not is_answerer:
-    #     return None
+    if not is_answerer:
+        return None
     return _format_section("Favorite motifs", persona.favorite_motifs)
 
 
 def _build_avoid_section(
     persona: PersonaContext, is_answerer: bool
 ) -> str | None:
-    # if not is_answerer:
-    #     return None
+    if not is_answerer:
+        return None
     return _format_section("Avoids", persona.avoid_triggers)
 
 
