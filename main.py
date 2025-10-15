@@ -6,12 +6,16 @@ from pathlib import Path
 
 import direct_prompting_method
 from history import (
+    load_question_clustering,
     save_question_clustering,
     serialise_run_record,
 )
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
+from tasks.detective_cases.bayesian import Bayesian
+from tasks.detective_cases.data import load_all_data
+from tasks.detective_cases.direct import Direct
 from tasks.direct_prompting_task import DirectPromptingTask
 # from tasks.med_dg.baseline import Baseline
 # from tasks.med_dg.baseline_multi import BaselineWithMultibranching
@@ -55,7 +59,7 @@ async def main(output_dir: Path) -> None:
             instance=item,
             max_conversation_depth=15
         )
-        for item in dataset[start_idx:]
+        for item in dataset[20:40]
     ]
 
     # =============== EXECUTION ===============
@@ -63,6 +67,10 @@ async def main(output_dir: Path) -> None:
     shared_clustering = (
         QuestionClustering(clustering_threshold) if shared_question_cluster else None
     )
+    # shared_clustering = load_question_clustering(
+    #     Path("logs/20q_deepseek_temp05_50/49_cluster.json"),
+    #     Path("logs/20q_deepseek_temp05_50/49_cluster.voy"),
+    # )
 
     semaphore = asyncio.Semaphore(max_concurrent)
 

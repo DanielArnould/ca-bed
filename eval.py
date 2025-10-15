@@ -5,6 +5,7 @@ from history import RunRecord
 
 import json
 
+
 class RunEval(TypedDict):
     top1: bool
     top3: bool
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--questioner-output-price",
         type=float,
-        default=0.42,
+        default=0.2,
         help="Questioner output token price per 1M tokens",
     )
     parser.add_argument(
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--answerer-output-price",
         type=float,
-        default=0.42,
+        default=0.2,
         help="Answerer output token price per 1M tokens",
     )
     parser.add_argument(
