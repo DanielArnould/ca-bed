@@ -6,220 +6,170 @@ from typing import override
 
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, get_conversation_history
-from tasks.direct_prompting_task import (
-    DirectPromptingTask,
-    Question,
-    Recommendations,
-)
+from tasks.direct_prompting_task import DirectPromptingTask, Prediction, Question
 
-from .common import MovieLensInstance, format_candidate_movies, format_persona_context
+from .common import (
+    PersonaLineup,
+    build_answerer_prompt,
+    build_questioner_preamble,
+    create_persona_lineup,
+    format_history_block,
+)
+from .data import PersonaMovieMatchInstance
 
 
 class Direct(DirectPromptingTask):
-    instance: MovieLensInstance
+    lineup: PersonaLineup
 
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        instance: MovieLensInstance,
+        instance: PersonaMovieMatchInstance,
         max_conversation_depth: int,
-        recommendation_count: int = 10,
     ) -> None:
-        self.instance = instance
+        self.lineup = create_persona_lineup(instance)
+        self._questioner_preamble = build_questioner_preamble(self.lineup)
 
-        candidate_titles = [movie.title for movie in instance.candidate_movies]
-        if not candidate_titles:
-            raise ValueError("candidate_movies must not be empty")
-
-        if recommendation_count <= 0:
-            raise ValueError("recommendation_count must be positive")
-
-        self._candidate_block = format_candidate_movies(instance.candidate_movies)
-        self._persona_block = format_persona_context(instance.persona)
-        self._recommendation_target = min(recommendation_count, len(candidate_titles))
-        self._candidate_lookup = {title.casefold(): title for title in candidate_titles}
-        self._candidate_lookup_normalised = {
-            self._normalise_title(title): title for title in candidate_titles
+        self._name_lookup = {
+            name.casefold(): name for name in self.lineup.hypothesis_space
+        }
+        self._name_lookup_normalised = {
+            self._normalise_name(name): name for name in self.lineup.hypothesis_space
         }
 
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=None,
+            task_answer=self.lineup.target_name,
             max_conversation_depth=max_conversation_depth,
-            hypothesis_space=candidate_titles,
+            hypothesis_space=self.lineup.hypothesis_space,
         )
 
     def __str__(self) -> str:
-        persona_name = self.instance.persona.name or "Unknown Persona"
         return (
-            "MovieLens (Direct): "
-            f"task_answer={self.task_answer!r} "
-            f"max_conversation_depth={self.max_conversation_depth} "
-            f"recommendation_count={self._recommendation_target} "
-            f"persona={persona_name!r}"
+            "MovieLens Persona Match (Direct): "
+            f"answer={self.task_answer!r} "
+            f"max_conversation_depth={self.max_conversation_depth}"
         )
 
     @override
     async def query_questioner(
         self, current_node: EvidenceNode
-    ) -> Question | Recommendations:
-        parts: list[str] = []
+    ) -> Question | Prediction:
+        history = get_conversation_history(current_node)
+        turns_remaining = max(0, self.max_conversation_depth - len(history))
+
+        parts: list[str] = [self._questioner_preamble]
+
+        history_block = format_history_block(history)
+        if history_block:
+            parts.append(history_block)
 
         parts.append(
             dedent(
-                f"""\
-                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist.
+                """\
+                ### Task
+                Decide whether to ask another YES/NO question or to make your final prediction about which persona loves the target film.
+                - Each question must be answerable with exactly 'Yes' or 'No'.
+                - Focus on concrete tastes, habits, or viewing preferences that would separate the personas.
+                - Avoid repeating previously asked topics or paraphrasing earlier questions.
 
-                ### Candidate Films
-                {self._candidate_block}
+                ### Response Format
+                If you need more information, respond with:
+                [QUESTION]: <one precise YES/NO question>
 
-                Use the user's answers to understand their taste. Ask concise YES/NO questions that reveal concrete preferences about tone, pacing, genre blends, themes, or iconic elements. Avoid repeating or paraphrasing earlier questions.
-                """
+                If you are confident enough to guess, respond with:
+                [PREDICTION]: <Persona Name>
+                Use a persona name from the candidate list exactly as written."""
             ).strip()
         )
 
-        history = get_conversation_history(current_node)
-        if history:
-            formatted_history = "\n".join(
-                f"- Q: {question}; A: {answer}" for question, answer in history
-            )
+        if len(history) >= self.max_conversation_depth - 2 and turns_remaining > 1:
             parts.append(
                 dedent(
-                    f"""
-                    These are the questions asked so far and the user's answers:
-                    {formatted_history}
-                    """
+                    """\
+                    You are running low on turns. Consider whether you already have enough evidence to identify the correct persona."""
                 ).strip()
             )
-
-        turns_remaining = max(0, self.max_conversation_depth - len(history))
-        recommendation_target = self._recommendation_target
 
         if turns_remaining <= 1:
             parts.append(
                 dedent(
-                    f"""
-                    You have no further opportunities to ask questions. Provide your final ranked watchlist now.
+                    """\
+                    You have no remaining opportunities to ask questions after this response.
 
-                    Respond with exactly one line in the format:
-                    [RECOMMENDATIONS]: Title 1; Title 2; ...; Title {recommendation_target}
+                    Respond with exactly one line:
+                    [PREDICTION]: <Persona Name>
 
-                    List {recommendation_target} distinct films from the candidate list using their EXACT titles and release dates, ordered from strongest to weakest recommendation. Include no commentary, numbering, or extra text—only the tag and semicolon-separated titles.
-                    """
-                ).strip()
-            )
-        else:
-            remaining_after = turns_remaining - 1
-            plural = "questions" if remaining_after != 1 else "question"
-            parts.append(
-                dedent(
-                    f"""
-                    You may ask another YES/NO question now. After this exchange you will have {remaining_after} {plural} left before submitting your final recommendations.
-
-                    Respond with:
-                    [QUESTION]: <one precise YES/NO question>
-                    """
+                    Use a persona name from the candidate list verbatim. Do not add commentary or extra text."""
                 ).strip()
             )
 
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
 
-        question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
-        recommendation_match = re.search(
-            r"\[RECOMMENDATIONS\]:\s*(.*)", output, re.IGNORECASE | re.DOTALL
-        )
+        prediction_match = re.search(r"\[PREDICTION\]:", output, re.IGNORECASE)
+        question_match = re.search(r"\[QUESTION\]:", output, re.IGNORECASE)
 
-        expect_recommendations = turns_remaining <= 1
-
-        if expect_recommendations:
-            if recommendation_match:
-                titles = self._parse_recommendations(recommendation_match.group(1))
-                return Recommendations(titles)
-            raise RuntimeError(
-                "Expected recommendation list but model response was not recognised: "
-                f"{output}"
-            )
-
-        if recommendation_match and not expect_recommendations:
-            raise RuntimeError(
-                "Received recommendations before the final turn: "
-                f"{output}"
-            )
+        if prediction_match:
+            prediction = self._parse_prediction(output)
+            return Prediction(prediction)
 
         if question_match:
-            return Question(question_match.group(1).strip())
-
-        raise RuntimeError(f"Response does not match expected structure: {output}")
-
-    def _parse_recommendations(self, raw_block: str) -> tuple[str, ...]:
-        entries = re.split(r"[;\n]+", raw_block)
-        titles: list[str] = []
-        seen: set[str] = set()
-
-        for entry in entries:
-            cleaned = entry.strip()
-            if not cleaned:
-                continue
-
-            cleaned = re.sub(r"^[\u2022•\-]+\s*", "", cleaned)
-            cleaned = re.sub(r"^\d+\.\s*", "", cleaned)
-            cleaned = re.sub(r"^\d+\)\s*", "", cleaned)
-            cleaned = re.sub(r"^\d+\s*-\s*", "", cleaned)
-            cleaned = cleaned.strip().strip('\"\'\u201c\u201d')
-
-            if not cleaned:
-                continue
-
-            canonical = self._candidate_lookup.get(cleaned.casefold())
-            if canonical is None:
-                canonical = self._candidate_lookup_normalised.get(
-                    self._normalise_title(cleaned)
+            if turns_remaining <= 1:
+                raise RuntimeError(
+                    "Expected a prediction because no turns remain, but received a question."
                 )
+            question = self._parse_question(output)
+            return Question(question)
 
-            if canonical is None or canonical in seen:
-                continue
-
-            titles.append(canonical)
-            seen.add(canonical)
-
-            if len(titles) >= self._recommendation_target:
-                break
-
-        if not titles:
-            raise RuntimeError(
-                "Failed to extract any valid candidate titles from recommendations: "
-                f"{raw_block}"
-            )
-
-        return tuple(titles)
-
-    @staticmethod
-    def _normalise_title(text: str) -> str:
-        return re.sub(r"[^a-z0-9]", "", text.casefold())
+        raise RuntimeError(
+            f"Response does not match expected structure: {output}"
+        )
 
     @override
     async def query_answerer(self, question: str) -> str:
-        persona_name = self.instance.persona.name or "the movie lover"
-        gender_note = (
-            f" {self.instance.persona.gender.lower()}"
-            if self.instance.persona.gender
-            else ""
-        )
-
-        prompt = dedent(
-            f"""\
-            You are {persona_name}{gender_note}. Stay fully in character and use the persona briefing below.
-
-            Persona briefing:
-            {self._persona_block}
-
-            Answer the curator's question exactly as this persona would. Reply with ONLY "Yes" or "No"—no additional words.
-
-            Question: {question}
-            """
-        ).strip()
-
+        prompt = build_answerer_prompt(self.lineup, question)
         return await query_llm(prompt, self.answerer_session)
+
+    def _parse_question(self, raw_block: str) -> str:
+        match = re.search(r"\[QUESTION\]:\s*(.*)", raw_block, re.IGNORECASE)
+        if not match:
+            raise RuntimeError(
+                f"Expected question marker in response but received: {raw_block}"
+            )
+        question = match.group(1).strip()
+        if not question:
+            raise RuntimeError("Question content was empty.")
+        return question
+
+    def _parse_prediction(self, raw_block: str) -> str:
+        match = re.search(r"\[PREDICTION\]:\s*(.*)", raw_block, re.IGNORECASE)
+        if not match:
+            raise RuntimeError(
+                f"Expected prediction marker in response but received: {raw_block}"
+            )
+        candidate = match.group(1).strip()
+        if not candidate:
+            raise RuntimeError("Prediction content was empty.")
+
+        canonical = self._name_lookup.get(candidate.casefold())
+        if canonical is None:
+            canonical = self._name_lookup_normalised.get(
+                self._normalise_name(candidate)
+            )
+
+        if canonical is None:
+            raise RuntimeError(
+                f"Prediction did not contain a recognisable persona: {candidate}"
+            )
+
+        return canonical
+
+    @staticmethod
+    def _normalise_name(text: str) -> str:
+        cleaned = re.sub(r"[\u2018\u2019\u201c\u201d]", "", text)
+        cleaned = re.sub(r"[\"'`]", "", cleaned)
+        cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned.casefold())
+        return re.sub(r"\s+", " ", cleaned).strip()

@@ -46,7 +46,9 @@ llm_models: dict[str, dict] = {
     "deepseek_chat": {
         "client": _deepseek_client,
         "model_name": "deepseek-chat",
-        "params": {},
+        "params": {
+            'temperature': 1.0
+        },
     },
     "deepseek_reasoner": {
         "client": _deepseek_client,
@@ -137,7 +139,7 @@ async def query_llm(input_text: str, session: LLMRequestSession) -> str:
     model_name: str = model_config["model_name"]
     extra_params: dict = model_config["params"]
 
-    if model_name != 'gpt-5':
+    if model_name != 'gpt-5' and extra_params.get('temperature') is None:
         extra_params['temperature'] = 0
 
     if client is None:

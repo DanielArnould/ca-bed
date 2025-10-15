@@ -14,115 +14,75 @@ from tasks.task import (
     parse_categorical_likelihoods,
 )
 
-from .common import MovieLensInstance, format_candidate_movies, format_persona_context
+from .common import (
+    PersonaLineup,
+    build_answerer_prompt,
+    build_question_evaluation_header,
+    build_question_generation_instructions,
+    build_questioner_preamble,
+    create_persona_lineup,
+    format_belief_block,
+    format_history_block,
+)
+from .data import PersonaMovieMatchInstance
 
 
 class Baseline(Task):
-    instance: MovieLensInstance
+    lineup: PersonaLineup
 
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        instance: MovieLensInstance,
+        instance: PersonaMovieMatchInstance,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
     ) -> None:
-        self.instance = instance
-        self._persona_block = format_persona_context(instance.persona)
-        self._candidate_block = format_candidate_movies(instance.candidate_movies)
+        self.lineup = create_persona_lineup(instance)
+        self._questioner_preamble = build_questioner_preamble(self.lineup)
 
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=instance.target_movie.title if instance.target_movie else None,
+            task_answer=self.lineup.target_name,
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=1.0,
-            hypothesis_space=instance.hypothesis_space,
+            hypothesis_space=self.lineup.hypothesis_space,
         )
 
     def __str__(self) -> str:
-        persona_name = self.instance.persona.name or "Unknown Persona"
         return (
-            "MovieLens (Non-Bayesian): "
-            f"task_answer={self.task_answer!r} "
+            "MovieLens Persona Match (Baseline): "
+            f"answer={self.task_answer!r} "
             f"max_question_nodes={self.max_question_nodes} "
             f"max_lookahead_depth={self.max_lookahead_depth} "
-            f"max_conversation_depth={self.max_conversation_depth} "
-            f"persona={persona_name!r}"
+            f"max_conversation_depth={self.max_conversation_depth}"
         )
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
         uniform = 1.0 / len(self.hypothesis_space)
-        return {title: uniform for title in self.hypothesis_space}
+        return {name: uniform for name in self.hypothesis_space}
 
     @override
     async def create_questions(
         self, current_node: EvidenceNode
     ) -> dict[str, list[str]]:
-        parts: list[str] = []
+        parts: list[str] = [self._questioner_preamble]
+
+        history_block = format_history_block(get_conversation_history(current_node))
+        if history_block:
+            parts.append(history_block)
+
+        belief_block = format_belief_block(current_node.belief_state)
+        if belief_block:
+            parts.append(belief_block)
 
         parts.append(
-            dedent(
-                f"""\
-                You are an insightful film curator collaborating with a movie lover to assemble a personalised watchlist.
-
-                ### Candidate Films
-                {self._candidate_block}
-
-                Use the user's answers to understand their taste. Ask concise YES/NO questions that reveal concrete preferences about tone, pacing, genre blends, themes, or iconic elements. Avoid repeating or paraphrasing earlier questions.
-                """
-            ).strip()
-        )
-
-        history = get_conversation_history(current_node)
-        if history:
-            history_formatted = "\n".join(
-                f"- Q: {question}; A: {answer}" for question, answer in history
-            )
-            parts.append(
-                dedent(
-                    f"""
-                    These are the questions asked so far and the user's answers:
-                    {history_formatted}
-                    """
-                ).strip()
-            )
-
-        belief_state_formatted = "\n".join(
-            f"- {title}"
-            for title, _ in sorted(
-                current_node.belief_state.items(), key=lambda item: item[1], reverse=True
-            )
-        )
-
-        if belief_state_formatted:
-            parts.append(
-                dedent(
-                    f"""\
-                    Based on your current beliefs, the leading candidates are:
-                    {belief_state_formatted}
-                    """
-                ).strip()
-            )
-
-        parts.append(
-            dedent(
-                f"""
-                Your task is to generate {self.max_question_nodes} excellent YES/NO questions to ask the user next.
-                The best questions help you learn their tastes from scratch and sharply distinguish between the remaining candidate films using concrete cinematic traits, plot points, themes, or tonal qualities.
-
-                Format your response exactly as:
-                1. <Question 1>
-                2. <Question 2>
-                ...
-                n. <Question n>
-                """
-            ).strip()
+            build_question_generation_instructions(self.max_question_nodes)
         )
 
         prompt = "\n\n".join(parts)
@@ -134,49 +94,43 @@ class Baseline(Task):
     @override
     @retry(stop=stop_after_attempt(2))
     async def get_likelihoods(
-        self, question: str, answers: list[str], hypotheses: list[str]
+        self,
+        question: str,
+        answers: list[str],
+        hypotheses: list[str],
     ) -> dict[str, dict[str, float]]:
-        answers_block = "\n".join(f"- {answer}" for answer in answers)
-
-        prompt = dedent(
-            f"""\
-            You are evaluating which answer each candidate film would produce to the following YES/NO question, assuming that film is the one ultimately recommended.
-
-            ### Candidate Films
-            {self._candidate_block}
-
-            ### Question
-            "{question}"
-
-            ### Possible Answers
-            {answers_block}
-
+        header = build_question_evaluation_header(
+            self.lineup, question, answers, hypotheses
+        )
+        instruction = dedent(
+            """\
             ### Task
-            - Assume each film listed is the true recommendation for the user.
-            - Decide which answer (exactly one) that film would yield.
-            - Cover every film exactly once.
-            - Use ONLY the exact film titles as given.
+            - Assume each persona listed is the hidden fan of the target film.
+            - Decide which answer they would most likely give to the question.
+            - Assign every persona to exactly one answer option (no omissions, no duplicates).
+            - Use the persona names exactly as provided.
+            - Present the answers in the same order that the answer options were listed.
 
             ### Response Format
-            Yes: Title A, Title B, ...
-            Count of 'Yes': <integer>
-            No: Title C, Title D, ...
-            Count of 'No': <integer>
+            <Answer Label>: Persona 1, Persona 2, ...
+            Count of '<Answer Label>': <integer>
+            <Next Answer Label>: Persona 3, Persona 4, ...
+            Count of '<Next Answer Label>': <integer>
 
-            Do not include commentary or extra text.
-            """
+            Do not include commentary or extra text."""
         ).strip()
 
+        prompt = "\n\n".join([header, instruction])
         output = await query_llm(prompt, self.questioner_session)
         likelihoods = parse_categorical_likelihoods(output, possible_answers=answers)
 
         likelihood_map: dict[str, dict[str, float]] = {}
         for likelihood in likelihoods:
-            if likelihood.hypothesis not in hypotheses:
-                continue
             likelihood_map[likelihood.hypothesis] = {
                 answer: probability
-                for answer, probability in zip(answers, likelihood.likelihoods, strict=True)
+                for answer, probability in zip(
+                    answers, likelihood.likelihoods, strict=True
+                )
             }
 
         missing = set(hypotheses) - set(likelihood_map)
@@ -189,31 +143,6 @@ class Baseline(Task):
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        persona_name = self.instance.persona.name or "the movie lover"
-        gender_note = (
-            f" {self.instance.persona.gender.lower()}"
-            if self.instance.persona.gender
-            else ""
-        )
-        options_block = ", ".join(
-            f'"{answer}"' for answer in current_node.possible_answers
-        )
-
-        prompt = dedent(
-            f"""\
-            You are {persona_name}{gender_note}. Stay fully in character and rely on the persona briefing when answering.
-
-            Persona briefing:
-            {self._persona_block}
-
-            Available responses: {options_block}
-
-            ### Question
-            "{current_node.question}"
-
-            Reply with EXACTLY one of the available responses—no additional words.
-            """
-        ).strip()
-
+        prompt = build_answerer_prompt(self.lineup, current_node.question)
         output = await query_llm(prompt, self.answerer_session)
         return parse_answer(output, current_node)
