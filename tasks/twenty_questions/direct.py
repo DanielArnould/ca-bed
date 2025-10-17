@@ -4,11 +4,7 @@ from typing import override
 
 from models import LLMRequestSession, query_llm
 from node import EvidenceNode, get_conversation_history
-from tasks.direct_prompting_task import (
-    DirectPromptingTask,
-    Prediction,
-    Question,
-)
+from tasks.direct_prompting_task import DirectPromptingTask, Question
 
 
 class Direct(DirectPromptingTask):
@@ -29,12 +25,14 @@ class Direct(DirectPromptingTask):
         )
 
     def __str__(self) -> str:
-        return f"Twenty Questions (Direct): {self.task_answer=} {self.max_conversation_depth=} {self.hypothesis_space=}"
+        return (
+            "Twenty Questions (Direct): "
+            f"{self.task_answer=} {self.max_conversation_depth=} "
+            f"{self.hypothesis_space=}"
+        )
 
     @override
-    async def query_questioner(
-        self, current_node: EvidenceNode
-    ) -> Question | Prediction:
+    async def query_questioner(self, current_node: EvidenceNode) -> Question:
         parts = []
 
         # Prologue
@@ -44,14 +42,16 @@ class Direct(DirectPromptingTask):
             You are an expert player of the 20 Questions game. Your goal is to guess a secret entity, X. I will be impersonating the secret entity, X.
             The secret entity could be one of the following:
             {possible_items}
-            
-            You can either ask questions that starts with 'Is X' and can only be answered by 'Yes' or 'No', or you can make a prediction of what X is.
-            
-            If you are confident enough to make a prediction, output:
-            [PREDICTION]: <This should ONLY be the exact name of the entity from the list of possible entities>
 
-            Otherwise, if you need more information, output:
-            [QUESTION]: <Your yes/no question here>
+            You must always respond with exactly one yes/no question about X. Every question must:
+            - Start with the words 'Is X'
+            - Be answerable with 'Yes' or 'No'
+            - Contain no additional commentary
+
+            Respond using exactly this format on a single line:
+            [QUESTION]: Is X <your question>?
+
+            Do not answer outside of this question format.
             """)
             .format(possible_items=possible_items)
             .strip()
@@ -68,30 +68,22 @@ class Direct(DirectPromptingTask):
                 """).strip()
             )
 
-        # Targetting prompt
-        if len(history) >= self.max_conversation_depth - 3:
-            parts.append(
-                dedent("""
-                Now you should make predicitions instead of asking questions
-                """).strip()
-            )
-
         # Query LLM
         prompt = "\n\n".join(parts)
         output = await query_llm(prompt, self.questioner_session)
 
         # Parse LLM
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
-        prediction_match = re.search(
-            r"\[(PREDICTION|ANSWER)\]:\s*(.*)", output, re.IGNORECASE
-        )
 
         if question_match:
-            return Question(question_match.group(1).strip())
-        elif prediction_match:
-            return Prediction(prediction_match.group(2).strip())
-        else:
-            raise RuntimeError(f"Response does not match expected structure, {output}")
+            question = question_match.group(1).strip()
+            if not question.lower().startswith("is x"):
+                raise RuntimeError(f"Question must start with 'Is X': {question}")
+            return Question(question)
+
+        raise RuntimeError(
+            f"Response does not match expected structure. Output received: {output}"
+        )
 
     @override
     async def query_answerer(self, question: str) -> str:
@@ -101,11 +93,16 @@ class Direct(DirectPromptingTask):
 
             ### Instructions
             - Answer truthfully based on what X is.
-            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
-            - Do not add extra text or commentary. Return exactly one of the options.
+            - Default to responding with exactly 'Yes' or 'No'.
+            - If the question is explicitly asking whether X is {self.task_answer} (for example, "Is X {self.task_answer}?"), reply with 'Yes [CORRECT]' and nothing else.
+            - Never append '[CORRECT]' to a response unless the question is a correct direct guess of X.
+            - Do not add extra text or commentary.
 
             ### Question
             "{question}"
             """).strip()
 
         return await query_llm(prompt, self.answerer_session)
+
+    def is_correct_signal(self, question: str, answer: str) -> bool:
+        return "[CORRECT]" in answer.upper()

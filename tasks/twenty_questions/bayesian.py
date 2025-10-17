@@ -65,15 +65,15 @@ class Bayesian(Task):
 
         # Current belief state
         belief_state_formatted = "\n".join(
-            f"- X: {hypo}; Probability: {prob}"
-            for hypo, prob in current_node.belief_state.items()
+            f"- {item}" for item in current_node.belief_state.keys()
         )
         parts.append(
             dedent(f"""
-                Based on our current beliefs, the secret entity is most likely one of the following, which are listed along with their probabilities:
+                The secret object is most likely one of the following items:
                 {belief_state_formatted}
                 """).strip()
         )
+
 
         # Question generation
         parts.append(

@@ -47,7 +47,7 @@ llm_models: dict[str, dict] = {
         "client": _deepseek_client,
         "model_name": "deepseek-chat",
         "params": {
-            'temperature': 1.0
+            'temperature': 0
         },
     },
     "deepseek_reasoner": {
@@ -62,7 +62,7 @@ llm_models: dict[str, dict] = {
     },
     "deepseek_together_ai": {
         "client": _together_client,
-        "model_name": "DeepSeek-AI/DeepSeek-V3-2-Exp",
+        "model_name": "deepseek-ai/DeepSeek-V3.1",
         "params": {},
     },
     "gpt_4o_mini": {

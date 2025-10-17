@@ -32,6 +32,13 @@ async def run_task(
             current_node, 0, task, question_clustering, min_probability
         )
 
+        if not current_node.children:
+            logger.info(
+                "No further questions generated for %s; treating node as terminal.",
+                str(current_node),
+            )
+            break
+
         best_question_node = max(
             current_node.children,
             key=partial(expected_reward, sharpness_constant=sharpness_constant),
@@ -75,7 +82,13 @@ async def expand_evidence(
         return
 
     if not current_node.children:
-        new_questions = await task.create_questions(current_node)
+        try:
+            new_questions = await task.create_questions(current_node)
+        except ValueError as exc:
+            logger.info(
+                "Failed to generate questions for %s: %s", str(current_node), exc
+            )
+            return
         new_question_nodes = [
             QuestionNode(q, answers, current_node)
             for q, answers in new_questions.items()
@@ -151,7 +164,7 @@ def calculate_posterior(
     uniform_likelihood: float,
 ) -> tuple[dict[str, float], float]:
     all_posteriors = {
-        h: p * min(max((likelihoods.get(h, uniform_likelihood) ** 0.5), 0.01), 0.99)
+        h: p * (likelihoods.get(h, uniform_likelihood) * 0.7 + uniform_likelihood * 0.3)
         for h, p in prior.items()
     }
 

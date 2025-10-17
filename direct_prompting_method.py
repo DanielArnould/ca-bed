@@ -117,10 +117,13 @@ async def run_task(task: DirectPromptingTask) -> RunRecord:
                 final_path.append(str(question_node))
 
                 # Get answer from benchmark model
-                evidence_answer = await task.query_answerer(question)
+                raw_answer = await task.query_answerer(question)
+                evidence_answer = raw_answer.strip()
 
                 # Belief state unchanged for regular questions
                 updated_belief_state = current_node.belief_state.copy()
+                if task.is_correct_signal(question, evidence_answer):
+                    updated_belief_state = {task.task_answer: 1.0}
 
         evidence_node = EvidenceNode(
             answer=evidence_answer,

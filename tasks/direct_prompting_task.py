@@ -50,3 +50,7 @@ class DirectPromptingTask(ABC):
     @abstractmethod
     async def query_answerer(self, question: str) -> str:
         pass
+
+    def is_correct_signal(self, question: str, answer: str) -> bool:
+        """Return True when the provided answer indicates the task is solved."""
+        return False

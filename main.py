@@ -29,6 +29,7 @@ from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.twenty_questions.bayesian_logprobs import BayesianLogProbs
 from tasks.twenty_questions.bayesian import Bayesian
 from tasks.twenty_questions.data import COMMON as entities
+from tasks.twenty_questions.direct import Direct
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -39,13 +40,13 @@ async def main(output_dir: Path) -> None:
     questioner_model_key = "deepseek_chat"
     answerer_model_key = "deepseek_reasoner"
     sharpness_constant = 0.4
-    min_probability = 0.001
+    min_probability = 1 / 25_000
     max_concurrent = 8
     clustering_threshold = 0.99
     shared_question_cluster = True
     dataset = entities
-    start_idx = 0
-    end_idx = len(entities)
+    start_idx = 48
+    end_idx = 49
     conversation_depth = 20
 
     tasks = [
@@ -56,27 +57,28 @@ async def main(output_dir: Path) -> None:
             max_question_nodes=3,
             max_lookahead_depth=3,
             max_conversation_depth=conversation_depth,
-            confidence_threshold=0.7,
+            confidence_threshold=0.8,
             hypothesis_space=entities
         )
         # Direct(
         #     questioner_session=LLMRequestSession(questioner_model_key),
         #     answerer_session=LLMRequestSession(answerer_model_key),
-        #     instance=item,
-        #     max_conversation_depth=conversation_depth
+        #     task_answer=item,
+        #     max_conversation_depth=conversation_depth,
+        #     hypothesis_space=entities
         # )
         for item in dataset[start_idx:end_idx]
     ]
 
     # =============== EXECUTION ===============
     logger.info(f"Questioner: {questioner_model_key} Answerer: {answerer_model_key}")
-    shared_clustering = (
-        QuestionClustering(clustering_threshold) if shared_question_cluster else None
-    )
-    # shared_clustering = load_question_clustering(
-    #     Path("logs/20q_deepseek_temp05_50/49_cluster.json"),
-    #     Path("logs/20q_deepseek_temp05_50/49_cluster.voy"),
+    # shared_clustering = (
+    #     QuestionClustering(clustering_threshold) if shared_question_cluster else None
     # )
+    shared_clustering = load_question_clustering(
+        Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.json"),
+        Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.voy"),
+    )
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -162,7 +164,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/COMMON_by_logprobs_deepseek32_deepseekr1_test/")
+    output_dir = Path(f"logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,

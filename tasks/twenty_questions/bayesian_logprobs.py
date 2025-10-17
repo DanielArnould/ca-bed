@@ -164,10 +164,8 @@ class BayesianLogProbs(Bayesian):
                 1.0 - no_prob, no_prob
             )
         else:
-            raise RuntimeError(
-                "Could not find logprob for either response token. "
-                f"Available tokens: {sorted(logprob_map.keys())}"
-            )
+            no_prob = 0.5
+            yes_prob = 0.5
 
         return yes_prob, no_prob
 
