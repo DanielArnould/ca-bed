@@ -66,7 +66,7 @@ class Bayesian(Task):
         parts = []
         parts.append(
             dedent(f"""\
-            You are a detective investigating a murder.
+            You are a detective investigating a murder. You can ask up to {self.max_conversation_depth} questions.
 
             ### Case Background
             {self.background_info}
@@ -82,7 +82,9 @@ class Bayesian(Task):
 
         history = get_conversation_history(current_node)
         if history:
-            history_formatted = "\n".join(f"- Q: {q}; A: {a}" for q, a in history)
+            history_formatted = "\n".join(
+                f"{idx}. Q: {q}; A: {a}" for idx, (q, a) in enumerate(history, start=1)
+            )
             parts.append(
                 dedent(f"""\
                 These are the questions you've already asked so far:
