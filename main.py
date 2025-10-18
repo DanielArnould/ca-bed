@@ -28,12 +28,12 @@ async def main(output_dir: Path) -> None:
     answerer_model_key = "deepseek-reasoner"
     sharpness_constant = 0.4
     min_probability = 1 / 25_000
-    max_concurrent = 4
+    max_concurrent = 6
     clustering_threshold = 1.0
     shared_question_cluster = False
     dataset = load_all_data()
-    start_idx = 3
-    end_idx = 7
+    start_idx = 0
+    end_idx = 20
     conversation_depth = 20
 
     tasks = [
@@ -41,10 +41,11 @@ async def main(output_dir: Path) -> None:
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
-            max_question_nodes=3,
-            max_lookahead_depth=2,
+            max_question_nodes=10,
+            max_lookahead_depth=1,
             max_conversation_depth=conversation_depth,
             confidence_threshold=0.8,
+            estimator_confidence=0.7,
         )
         # Direct(
         #     questioner_session=LLMRequestSession(questioner_model_key),

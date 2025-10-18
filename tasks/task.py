@@ -17,6 +17,7 @@ class Task(ABC):
     max_lookahead_depth: int
     max_conversation_depth: int
     confidence_threshold: float
+    estimator_confidence: float
     hypothesis_space: list[str]
 
     def __init__(
@@ -28,6 +29,7 @@ class Task(ABC):
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
+        estimator_confidence: float,
         hypothesis_space: list[str],
     ):
         self.questioner_session = questioner_session
@@ -37,6 +39,7 @@ class Task(ABC):
         self.max_lookahead_depth = max_lookahead_depth
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold
+        self.estimator_confidence = estimator_confidence
         self.hypothesis_space = hypothesis_space
 
     @abstractmethod

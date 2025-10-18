@@ -27,6 +27,7 @@ class Bayesian(Task):
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
+        estimator_confidence: float,
         confidence_threshold: float,
     ):
         self.instance = instance
@@ -53,7 +54,20 @@ class Bayesian(Task):
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=confidence_threshold,
+            estimator_confidence=estimator_confidence,
             hypothesis_space=[suspect["name"] for suspect in self.instance["suspects"]],
+        )
+
+    def __str__(self) -> str:
+        return (
+            "Detective Cases (Bayesian): "
+            f"{self.questioner_session.model_key=} "
+            f"{self.answerer_session.model_key=} "
+            f"{self.max_question_nodes=} "
+            f"{self.max_lookahead_depth=} "
+            f"{self.max_conversation_depth=} "
+            f"{self.confidence_threshold=} "
+            f"{self.estimator_confidence=} "
         )
 
     @override

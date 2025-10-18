@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypedDict
 
@@ -9,6 +10,8 @@ import json
 class RunEval(TypedDict):
     top1: bool
     top3: bool
+    start_time: datetime
+    end_time: datetime
     conversation_length: int
     questioner_input_tokens: int
     questioner_output_tokens: int
@@ -20,11 +23,13 @@ class GroupEval(TypedDict):
     num_runs: int
     top1: float
     top3: float
+    duration: timedelta
     mean_conversation_length: float
     questioner_input_tokens: int
     questioner_output_tokens: int
     answerer_input_tokens: int
     answerer_output_tokens: int
+
 
 def get_run_eval(run_history: RunRecord) -> RunEval:
     guesses = sorted(
@@ -42,6 +47,8 @@ def get_run_eval(run_history: RunRecord) -> RunEval:
     return {
         "top1": top1,
         "top3": top3,
+        "start_time": run_history.start_time,
+        "end_time": run_history.end_time,
         "conversation_length": conversation_length,
         "questioner_input_tokens": run_history.questioner_session.total_input_tokens,
         "questioner_output_tokens": run_history.questioner_session.total_output_tokens,
@@ -70,16 +77,22 @@ def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
         run_eval["answerer_output_tokens"] for run_eval in run_evals
     )
 
+    duration = max(run_eval["end_time"] for run_eval in run_evals) - min(
+        run_eval["start_time"] for run_eval in run_evals
+    )
+
     return {
         "num_runs": len(run_evals),
         "top1": top1,
         "top3": top3,
+        "duration": duration,
         "mean_conversation_length": mean_conversation_length,
         "questioner_input_tokens": questioner_input_tokens,
         "questioner_output_tokens": questioner_output_tokens,
         "answerer_input_tokens": answerer_input_tokens,
         "answerer_output_tokens": answerer_output_tokens,
     }
+
 
 if __name__ == "__main__":
     import argparse
@@ -106,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--questioner-output-price",
         type=float,
-        default=0.2,
+        default=0.42,
         help="Questioner output token price per 1M tokens",
     )
     parser.add_argument(
@@ -118,14 +131,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--answerer-output-price",
         type=float,
-        default=0.2,
+        default=0.42,
         help="Answerer output token price per 1M tokens",
-    )
-    parser.add_argument(
-        "--output-file",
-        type=Path,
-        default=Path("eval_results.csv"),
-        help="CSV file to write results to",
     )
     args = parser.parse_args()
 
@@ -138,23 +145,39 @@ if __name__ == "__main__":
     results = []
     for dir_path in paths:
         run_evals: list[RunEval] = []
-        for i, path in enumerate(tqdm(dir_path.rglob("*run.json"), desc=f"Loading {dir_path.name}")):
+        for i, path in enumerate(
+            tqdm(dir_path.rglob("*run.json"), desc=f"Loading {dir_path.name}")
+        ):
             with path.open("r", encoding="utf-8") as f:
                 run_record = deserialise_run_record(json.load(f))
             run_evals.append(get_run_eval(run_record))
-        
+
         group_eval = get_group_eval(run_evals)
         cost = {
-            "questioner_input_price": (questioner_input_price / 1_000_000) * group_eval['questioner_input_tokens'],
-            "questioner_output_price": (questioner_output_price / 1_000_000) * group_eval['questioner_output_tokens'],
-            "answerer_input_price": (answerer_input_price / 1_000_000) * group_eval['answerer_input_tokens'],
-            "answerer_output_price": (answerer_output_price / 1_000_000) * group_eval['answerer_output_tokens'],
+            "questioner_input_price": (questioner_input_price / 1_000_000)
+            * group_eval["questioner_input_tokens"],
+            "questioner_output_price": (questioner_output_price / 1_000_000)
+            * group_eval["questioner_output_tokens"],
+            "answerer_input_price": (answerer_input_price / 1_000_000)
+            * group_eval["answerer_input_tokens"],
+            "answerer_output_price": (answerer_output_price / 1_000_000)
+            * group_eval["answerer_output_tokens"],
         }
-    
-        results.append({"experiment": dir_path.as_posix().split("/")[-1], **group_eval})
+        total_cost = sum(cost.values())
+
+        results.append(
+            {
+                "experiment": dir_path.as_posix().split("/")[-1],
+                "num_runs": group_eval["num_runs"],
+                "top1": group_eval["top1"],
+                "top3": group_eval["top1"],
+                "mean_conversation_length": group_eval["mean_conversation_length"],
+                "total_cost": total_cost,
+                "duration": group_eval["duration"],
+            }
+        )
 
     df = pl.DataFrame(results)
-    df.write_csv(args.output_file)
 
     print("\n" + "=" * 100)
     print("EXPERIMENT COMPARISON TABLE")

@@ -125,6 +125,7 @@ async def expand_questions(
                 likelihoods,
                 min_probability,
                 1 / len(answers),
+                task.estimator_confidence,
             )
             evidence_node = EvidenceNode(
                 answer=answer,
@@ -149,9 +150,14 @@ def calculate_posterior(
     likelihoods: dict[str, float],
     min_probability: float,
     uniform_likelihood: float,
+    estimator_confidence: float,
 ) -> tuple[dict[str, float], float]:
     all_posteriors = {
-        h: p * (likelihoods.get(h, uniform_likelihood) * 0.7 + uniform_likelihood * 0.3)
+        h: p
+        * (
+            likelihoods.get(h, uniform_likelihood) * estimator_confidence
+            + uniform_likelihood * (1 - estimator_confidence)
+        )
         for h, p in prior.items()
     }
 
