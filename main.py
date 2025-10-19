@@ -15,6 +15,7 @@ from models import LLMRequestSession
 from question_clustering import QuestionClustering
 
 from tasks.detective_cases.bayesian import Bayesian
+from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
 from tasks.detective_cases.data import load_all_data
 from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.task import Task
@@ -33,16 +34,16 @@ async def main(output_dir: Path) -> None:
     shared_question_cluster = False
     dataset = load_all_data()
     start_idx = 0
-    end_idx = 20
+    end_idx = 1
     conversation_depth = 20
 
     tasks = [
-        Bayesian(
+        BayesianWithMultibranching(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
-            max_question_nodes=10,
-            max_lookahead_depth=1,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
             max_conversation_depth=conversation_depth,
             confidence_threshold=0.8,
             estimator_confidence=0.7,

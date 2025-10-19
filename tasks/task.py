@@ -95,6 +95,28 @@ class Question:
     possible_answers: list[str]
 
 
+def parse_multi_questions(output: str) -> list[Question]:
+    output.replace("\\n", "\n")
+
+    questions: list[Question] = []
+
+    # Regex to find lines starting with optional whitespace, one or more digits,
+    # a period, more whitespace, and then captures the rest of the line.
+    question_pattern = re.compile(r"^\s*\d+\.\s+(.*)")
+
+    for line in output.splitlines():
+        match = question_pattern.match(line)
+        if match:
+            # group(1) contains the captured question text
+            question_text = match.group(1).strip()
+            question_text, *possible_answers = question_text.split("|")
+            questions.append(
+                Question(question=question_text, possible_answers=possible_answers)
+            )
+
+    return questions
+
+
 def parse_binary_questions(output: str) -> list[Question]:
     output.replace("\\n", "\n")
 
