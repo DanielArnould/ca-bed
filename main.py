@@ -40,13 +40,13 @@ async def main(output_dir: Path) -> None:
     questioner_model_key = "deepseek_chat"
     answerer_model_key = "deepseek_reasoner"
     sharpness_constant = 0.4
-    min_probability = 1 / 25_000
+    min_probability = 1 / 10_000
     max_concurrent = 8
     clustering_threshold = 0.99
     shared_question_cluster = True
     dataset = entities
-    start_idx = 48
-    end_idx = 49
+    start_idx = 50
+    end_idx = len(entities)
     conversation_depth = 20
 
     tasks = [
@@ -55,7 +55,7 @@ async def main(output_dir: Path) -> None:
             answerer_session=LLMRequestSession(answerer_model_key),
             task_answer=item,
             max_question_nodes=3,
-            max_lookahead_depth=3,
+            max_lookahead_depth=2,
             max_conversation_depth=conversation_depth,
             confidence_threshold=0.8,
             hypothesis_space=entities
@@ -72,13 +72,13 @@ async def main(output_dir: Path) -> None:
 
     # =============== EXECUTION ===============
     logger.info(f"Questioner: {questioner_model_key} Answerer: {answerer_model_key}")
-    # shared_clustering = (
-    #     QuestionClustering(clustering_threshold) if shared_question_cluster else None
-    # )
-    shared_clustering = load_question_clustering(
-        Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.json"),
-        Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.voy"),
+    shared_clustering = (
+        QuestionClustering(clustering_threshold) if shared_question_cluster else None
     )
+    # shared_clustering = load_question_clustering(
+    #     Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.json"),
+    #     Path("logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1/110_cluster.voy"),
+    # )
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -164,7 +164,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1")
+    output_dir = Path(f"logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1_tuning")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,

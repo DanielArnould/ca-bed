@@ -7,6 +7,9 @@ from tenacity import retry, stop_after_attempt
 
 from models import llm_models
 from .bayesian import Bayesian
+import logging
+
+logger = logging.getLogger("Bayesian LogProbs")
 
 class BayesianLogProbs(Bayesian):
     def __str__(self) -> str:
@@ -47,6 +50,7 @@ class BayesianLogProbs(Bayesian):
                 "max_tokens": 1,
                 "logprobs": True,
                 "top_logprobs": 20,
+                'temperature': 1
             }
         )
 
@@ -166,6 +170,8 @@ class BayesianLogProbs(Bayesian):
         else:
             no_prob = 0.5
             yes_prob = 0.5
+
+        logger.info(f'Probability (yes, no): {yes_prob, no_prob}')
 
         return yes_prob, no_prob
 
