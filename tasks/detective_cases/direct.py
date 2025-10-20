@@ -2,7 +2,7 @@ import re
 from textwrap import dedent
 from typing import override
 
-from models import LLMRequestSession, query_llm
+from models import LLMRequestSession, get_response
 from node import EvidenceNode, get_conversation_history
 from tasks.detective_cases.common import get_case_background, parse_question
 from tasks.detective_cases.data import DetectiveCasesInstance
@@ -116,7 +116,10 @@ class Direct(DirectPromptingTask):
 
         # Query LLM
         prompt = "\n\n".join(parts)
-        output = await query_llm(prompt, self.questioner_session)
+        output = await get_response(
+            messages=[{"role": "user", "content": prompt}],
+            session=self.questioner_session,
+        )
 
         # Parse LLM
         question_match = re.search(r"\[QUESTION\]:\s*(.*)", output, re.IGNORECASE)
@@ -161,4 +164,7 @@ class Direct(DirectPromptingTask):
             "{actual_question}"
         """)
 
-        return await query_llm(prompt, self.answerer_session)
+        return await get_response(
+            messages=[{"role": "user", "content": prompt}],
+            session=self.answerer_session,
+        )

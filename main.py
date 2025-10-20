@@ -14,9 +14,11 @@ import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
 
+from tasks.detective_cases.baseline import Baseline
 from tasks.detective_cases.bayesian import Bayesian
 from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
 from tasks.detective_cases.data import load_all_data
+from tasks.detective_cases.direct import Direct
 from tasks.direct_prompting_task import DirectPromptingTask
 from tasks.task import Task
 
@@ -33,27 +35,26 @@ async def main(output_dir: Path) -> None:
     clustering_threshold = 1.0
     shared_question_cluster = False
     dataset = load_all_data()
-    start_idx = 0
-    end_idx = 1
+    start_idx = 1
+    end_idx = 100
     conversation_depth = 20
 
     tasks = [
-        BayesianWithMultibranching(
+        Baseline(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
             instance=item,
             max_question_nodes=2,
             max_lookahead_depth=3,
             max_conversation_depth=conversation_depth,
-            confidence_threshold=0.8,
-            estimator_confidence=0.7,
+            confidence_threshold=1.0,
+            estimator_confidence=1.0,
         )
         # Direct(
         #     questioner_session=LLMRequestSession(questioner_model_key),
         #     answerer_session=LLMRequestSession(answerer_model_key),
-        #     task_answer=item,
+        #     instance=item,
         #     max_conversation_depth=conversation_depth,
-        #     hypothesis_space=entities
         # )
         for item in dataset[start_idx:end_idx]
     ]

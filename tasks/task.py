@@ -138,6 +138,41 @@ def parse_binary_questions(output: str) -> list[Question]:
     return questions
 
 
+@dataclass
+class Likelihood:
+    hypothesis: str
+    likelihoods: list[float]
+
+
+def parse_categorical_likelihoods(
+    output: str, possible_answers: list[str]
+) -> list[Likelihood]:
+    output = output.replace("\\n", "\n")
+
+    label_to_items: dict[str, list[str]] = {}
+
+    # Match lines like "Label: item1, item2"
+    line_pattern = re.compile(r"^\s*([^:]+):\s*(.*)$")
+
+    for line in output.splitlines():
+        if match := line_pattern.match(line):
+            label = match.group(1).strip()
+            items = [s.strip() for s in match.group(2).split(",") if s.strip()]
+            label_to_items[label] = items
+
+    all_items = sorted({item for items in label_to_items.values() for item in items})
+
+    likelihoods: list[Likelihood] = []
+
+    for item in all_items:
+        vector = [
+            1.0 if item in label_to_items[label] else 1e-5 for label in possible_answers
+        ]
+        likelihoods.append(Likelihood(hypothesis=item, likelihoods=vector))
+
+    return likelihoods
+
+
 def parse_answer(output: str, question_node: QuestionNode) -> EvidenceNode:
     llm_answer = output.strip().lower()
 

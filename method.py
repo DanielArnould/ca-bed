@@ -27,23 +27,26 @@ async def run_task(
     current_node = root
     final_path.append(str(current_node))
 
-    while not is_terminal(current_node, task):
-        await expand_evidence(
-            current_node, 0, task, question_clustering, min_probability
-        )
+    try:
+        while not is_terminal(current_node, task):
+            await expand_evidence(
+                current_node, 0, task, question_clustering, min_probability
+            )
 
-        best_question_node = max(
-            current_node.children,
-            key=partial(expected_reward, sharpness_constant=sharpness_constant),
-        )
-        logger.info(f"Selected question node: {str(best_question_node)}")
-        final_path.append(str(best_question_node))
+            best_question_node = max(
+                current_node.children,
+                key=partial(expected_reward, sharpness_constant=sharpness_constant),
+            )
+            logger.info(f"Selected question node: {str(best_question_node)}")
+            final_path.append(str(best_question_node))
 
-        # Get question answer and move ahead
-        selected_evidence_node = await task.get_answer(best_question_node)
-        logger.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
-        current_node = selected_evidence_node
-        final_path.append(str(current_node))
+            # Get question answer and move ahead
+            selected_evidence_node = await task.get_answer(best_question_node)
+            logger.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
+            current_node = selected_evidence_node
+            final_path.append(str(current_node))
+    except Exception as e:
+        logger.error("Something went wrong", e)
 
     end_time = datetime.now()
     logger.info(
