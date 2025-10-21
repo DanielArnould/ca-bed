@@ -25,6 +25,7 @@ class GroupEval(TypedDict):
     top3: float
     duration: timedelta
     mean_conversation_length: float
+    mean_conversation_length_in_successful_cases: float
     questioner_input_tokens: int
     questioner_output_tokens: int
     answerer_input_tokens: int
@@ -63,6 +64,12 @@ def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
     mean_conversation_length = sum(
         run_eval["conversation_length"] for run_eval in run_evals
     ) / len(run_evals)
+    conv_length_successful = [
+        run_eval["conversation_length"] for run_eval in run_evals if run_eval["top1"]
+    ]
+    mean_conversation_length_in_successful_cases = sum(conv_length_successful) / len(
+        conv_length_successful
+    )
 
     questioner_input_tokens = sum(
         run_eval["questioner_input_tokens"] for run_eval in run_evals
@@ -87,6 +94,7 @@ def get_group_eval(run_evals: list[RunEval]) -> GroupEval:
         "top3": top3,
         "duration": duration,
         "mean_conversation_length": mean_conversation_length,
+        "mean_conversation_length_in_successful_cases": mean_conversation_length_in_successful_cases,
         "questioner_input_tokens": questioner_input_tokens,
         "questioner_output_tokens": questioner_output_tokens,
         "answerer_input_tokens": answerer_input_tokens,
@@ -172,6 +180,9 @@ if __name__ == "__main__":
                 "top1": group_eval["top1"],
                 "top3": group_eval["top1"],
                 "mean_conversation_length": group_eval["mean_conversation_length"],
+                "mean_conversation_length_in_successful_cases": group_eval[
+                    "mean_conversation_length_in_successful_cases"
+                ],
                 "total_cost": total_cost,
                 "duration": group_eval["duration"],
             }
