@@ -178,7 +178,7 @@ if __name__ == "__main__":
                 "experiment": dir_path.as_posix().split("/")[-1],
                 "num_runs": group_eval["num_runs"],
                 "top1": group_eval["top1"],
-                "top3": group_eval["top1"],
+                "top3": group_eval["top3"],
                 "mean_conversation_length": group_eval["mean_conversation_length"],
                 "mean_conversation_length_in_successful_cases": group_eval[
                     "mean_conversation_length_in_successful_cases"
