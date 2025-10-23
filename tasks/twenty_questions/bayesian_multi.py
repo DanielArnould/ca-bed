@@ -16,7 +16,7 @@ from tasks.tree_task import (
 )
 
 
-class BayesianWithMultibranching(TreeTask):
+class TwentyQuestionsBayesianWithMultibranching(TreeTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,

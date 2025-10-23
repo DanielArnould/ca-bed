@@ -18,7 +18,7 @@ from tasks.tree_task import (
 )
 
 
-class BayesianWithMultibranching(TreeTask):
+class DetectiveCasesBayesianWithMultibranching(TreeTask):
     instance: DetectiveCasesInstance
     background_info: str
     suspects_info: str

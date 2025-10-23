@@ -12,7 +12,7 @@ from tasks.tree_task import (
 )
 
 
-class UoT(TreeTask):
+class TwentyQuestionsUoT(TreeTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,

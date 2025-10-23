@@ -7,7 +7,7 @@ from node import EvidenceNode, get_conversation_history
 from tasks.direct_prompting_task import DirectPromptingTask, Question
 
 
-class Direct(DirectPromptingTask):
+class TwentyQuestionsDirect(DirectPromptingTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,

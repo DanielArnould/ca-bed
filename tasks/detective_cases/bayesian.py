@@ -14,7 +14,7 @@ from tasks.tree_task import (
 )
 
 
-class Bayesian(TreeTask):
+class DetectiveCasesBayesian(TreeTask):
     instance: DetectiveCasesInstance
     background_info: str
     suspects_info: str

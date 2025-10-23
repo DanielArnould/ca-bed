@@ -13,7 +13,7 @@ from tasks.direct_prompting_task import (
 )
 
 
-class Direct(DirectPromptingTask):
+class DetectiveCasesDirect(DirectPromptingTask):
     instance: DetectiveCasesInstance
 
     def __init__(

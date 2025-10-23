@@ -12,7 +12,7 @@ from tasks.tree_task import (
 )
 
 
-class UoT(TreeTask):
+class DetectiveCasesUoT(TreeTask):
     instance: DetectiveCasesInstance
     background_info: str
     suspects_info: str

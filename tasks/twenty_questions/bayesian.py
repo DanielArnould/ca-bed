@@ -16,7 +16,7 @@ from tasks.tree_task import (
 )
 
 
-class Bayesian(TreeTask):
+class TwentyQuestionsBayesian(TreeTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,
