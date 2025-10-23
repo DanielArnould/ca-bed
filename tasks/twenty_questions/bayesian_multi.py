@@ -2,65 +2,48 @@ import asyncio
 from textwrap import dedent
 from typing import override
 
-from models import LLMRequestSession, get_response, get_top_logprobs_for_messages
+from models import (
+    LLMRequestSession,
+    get_response,
+    get_top_logprobs_for_messages,
+)
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.detective_cases.common import get_case_background, parse_question
-from tasks.detective_cases.data import DetectiveCasesInstance
 from tasks.task import (
     Task,
     normalise_logprobs,
     parse_answer,
-    parse_binary_questions,
+    parse_multi_questions,
 )
 
 
-class Bayesian(Task):
-    instance: DetectiveCasesInstance
-    background_info: str
-    suspects_info: str
-
+class BayesianWithMultibranching(Task):
     def __init__(
         self,
         questioner_session: LLMRequestSession,
         answerer_session: LLMRequestSession,
-        instance: DetectiveCasesInstance,
+        task_answer: str,
         max_question_nodes: int,
         max_lookahead_depth: int,
         max_conversation_depth: int,
         estimator_confidence: float,
         confidence_threshold: float,
+        hypothesis_space: list[str],
     ):
-        self.instance = instance
-
-        self.background_info = get_case_background(self.instance)
-        self.suspects_info = "\n".join(
-            dedent(f"""\
-            - Suspect {idx + 1}:
-                - Name: {suspect["name"]}
-                - Introduction: {suspect["introduction"]}
-            """).strip()
-            for idx, suspect in enumerate(self.instance["suspects"])
-        )
-
         super().__init__(
             questioner_session=questioner_session,
             answerer_session=answerer_session,
-            task_answer=next(
-                suspect["name"]
-                for suspect in self.instance["suspects"]
-                if suspect.get("is_murderer", False)
-            ),
+            task_answer=task_answer,
             max_question_nodes=max_question_nodes,
             max_lookahead_depth=max_lookahead_depth,
             max_conversation_depth=max_conversation_depth,
-            confidence_threshold=confidence_threshold,
             estimator_confidence=estimator_confidence,
-            hypothesis_space=[suspect["name"] for suspect in self.instance["suspects"]],
+            confidence_threshold=confidence_threshold,
+            hypothesis_space=hypothesis_space,
         )
 
     def __str__(self) -> str:
         return (
-            "Detective Cases (Bayesian): "
+            "Twenty Questions (Bayesian + Multibranching): "
             f"{self.questioner_session.model_key=} "
             f"{self.answerer_session.model_key=} "
             f"{self.max_question_nodes=} "
@@ -73,24 +56,27 @@ class Bayesian(Task):
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:
         return {
-            suspect: 1 / len(self.hypothesis_space) for suspect in self.hypothesis_space
+            entity: 1 / len(self.hypothesis_space) for entity in self.hypothesis_space
         }
 
     def _build_question_prompt(self, current_node: EvidenceNode) -> str:
-        parts = []
+        remaining_hypotheses = "\n".join(
+            f"- {item}" for item in current_node.belief_state.keys()
+        )
+
+        parts: list[str] = []
         parts.append(
             dedent(f"""\
-            You are a detective investigating a murder. You can ask up to {self.max_conversation_depth} questions.
+            You are an expert player of the 20 Questions game. Your goal is to guess a secret entity, X. I will be impersonating X.
 
-            ### Case Background
-            {self.background_info}
+            You may ultimately ask up to {self.max_conversation_depth} questions during the full game, but right now your task is to propose the next {self.max_question_nodes} candidate questions.
             """).strip()
         )
 
         parts.append(
             dedent(f"""\
-            The investigation focuses on {len(self.hypothesis_space)} suspects:
-            {self.suspects_info}
+            The secret entity is guaranteed to be one of the following possibilities:
+            {remaining_hypotheses}
             """).strip()
         )
 
@@ -101,7 +87,7 @@ class Bayesian(Task):
             )
             parts.append(
                 dedent(f"""\
-                These are the questions you've already asked so far:
+                The game so far:
                 {history_formatted}
                 """).strip()
             )
@@ -109,23 +95,24 @@ class Bayesian(Task):
         parts.append(
             dedent(f"""\
             ### Task
-            Generate {self.max_question_nodes} excellent yes/no interrogation questions.
-            - Each question must be explicitly directed to a specific suspect.
-            - Format the question as: "[Suspect Name] Question text".
-            - Each question can only answered by 'Yes' or 'No'
-            - Focus on questions that help distinguish between suspects (motive, alibi, opportunity, access to weapon).
+            Generate questions that help differentiate the remaining candidates. Each question must:
+            - Start with EXACTLY 'Is X' and be answerable truthfully about the secret entity.
+            - Provide a realistic set of possible answers for that question.
+            - Focus on attributes that meaningfully split the hypothesis space.
 
             ### Response Format
-            One line per question:
-            1. <Question 1>
+            Respond using one line per question in this EXACT structure:
+            1. Is X ... ?|Answer1|Answer2|Answer3
+            2. Is X ... ?|Answer1|Answer2
             ...
-            n. <Question n>
-
+            n. Is X ... ?|Answer1|Answer2|Answer3|Answer4
+                   
             ### Example
-            1. [Mr. Jones] Were you outside at 12:00PM? 
-            2. [Dr. Otto] Did you have access to the murder weapon?
+            1. Is X a living being?|Yes|No
+            2. Is X commonly found indoors?|Yes|No|Sometimes
             """).strip()
         )
+
         return "\n\n".join(parts)
 
     @override
@@ -137,61 +124,47 @@ class Bayesian(Task):
             messages=[{"role": "user", "content": prompt}],
             session=self.questioner_session,
         )
-        questions = parse_binary_questions(output)
+        questions = parse_multi_questions(output)
         return {question.question: question.possible_answers for question in questions}
 
     @override
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
-        answerer_name, actual_question = parse_question(self.hypothesis_space, question)
-
         tasks = []
+        likelihoods = {}
         for hypothesis_name in hypotheses:
             if hypothesis_name not in self.hypothesis_space:
                 continue
 
-            tasks.append(
-                self._get_likelihood_for_one_suspect(
-                    hypothesis_name=hypothesis_name,
-                    answerer_name=answerer_name,
-                    actual_question=actual_question,
-                    target_answers=answers,
-                )
+            item, probs = await self._get_likelihood_for_one_item(
+                item=hypothesis_name,
+                question=question,
+                target_answers=answers,
             )
-
-        results = await asyncio.gather(*tasks)
-        return {hypo_name: probs for hypo_name, probs in results}
+            likelihoods[item] = probs
+            
+        # results = await asyncio.gather(*tasks)
+        return likelihoods
 
     @override
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
-        suspect_name, question = parse_question(
-            self.hypothesis_space, current_node.question
-        )
-
-        suspect = next(
-            (s for s in self.instance["suspects"] if s["name"] == suspect_name),
-            None,
-        )
-        assert suspect is not None, f"Suspect '{suspect_name}' not found in case data"
+        answer_options = [child.answer for child in current_node.children]
+        answer_list = ", ".join(answer_options)
 
         prompt = dedent(f"""\
-            You are roleplaying as a suspect in a murder investigation.
-
-            ### Suspect
-            - Name: {suspect["name"]}
-            - Task: {suspect["task"]}
-            - Story: {suspect["story"]}
+            You are playing a game of 20 Questions. You must roleplay as the secret entity, X. X is {self.task_answer}.
 
             ### Instructions
-            - Answer the detective's question in character as {suspect_name}.
-            - Stay consistent with your task and story.
-            - You may lie, evade, or tell the truth depending on what seems natural for this suspect.
-            - You must ONLY respond with either 'Yes' or 'No', matching it EXACTLY.
-            - Do not add extra text or commentary. Return exactly one of the options.
+            - Answer truthfully based on what X is.
+            - Respond using exactly one of the provided options. You must copy it verbatim.
+            - Do not add extra commentary or punctuation.
 
-            ### Detective's Question
-            "{question}"
+            ### Question
+            "{current_node.question}"
+
+            ### Allowed Responses
+            {answer_list}
             """).strip()
 
         output = await get_response(
@@ -200,11 +173,10 @@ class Bayesian(Task):
         )
         return parse_answer(output, current_node)
 
-    async def _get_likelihood_for_one_suspect(
+    async def _get_likelihood_for_one_item(
         self,
-        hypothesis_name: str,
-        answerer_name: str,
-        actual_question: str,
+        item: str,
+        question: str,
         target_answers: list[str],
     ) -> tuple[str, dict[str, float]]:
         answer_list_str = "\n".join(
@@ -212,35 +184,28 @@ class Bayesian(Task):
         )
 
         user_prompt = dedent(f"""\
-            You are a detective investigating a murder case.
-
-            ### Case Background
-            {self.background_info}
-
-            ### Suspects
-            {self.suspects_info}
-
+            You are analysing a game of 20 Questions.
             ---
             ### Conditional Assumption
-            For the purpose of this question, **assume {hypothesis_name} is the murderer.**
+            For this hypothetical, assume that the secret entity is {item}.
             ---
 
             ### Scenario
-            You asked {answerer_name} the following question:
-            "{actual_question}"
+            The next question to the answerer was:
+            "{question}"
 
             ### Possible Answers
             {answer_list_str}
 
             ### Task
-            Given that {hypothesis_name} is the murderer, which answer did {answerer_name} give?
-            Respond with the number for the answer only.
+            Given that X is {item}, which answer did the answerer give?
+            Respond with only the number corresponding to the option.
 
-            {answerer_name}'s answer was number:""").strip()
+            The answer was number:""").strip()
 
         messages_for_api = [
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": " "},  # Force start token
+            {"role": "assistant", "content": " "},  # Encourage the model to emit tokens
         ]
 
         top_logprobs_list = await get_top_logprobs_for_messages(
@@ -250,7 +215,7 @@ class Bayesian(Task):
         if not top_logprobs_list:
             num_answers = len(target_answers)
             return (
-                hypothesis_name,
+                item,
                 {answer: 1.0 / num_answers for answer in target_answers},
             )
 
@@ -267,4 +232,4 @@ class Bayesian(Task):
             raw_logprobs[answer] = logprob
 
         normalised_probs = normalise_logprobs(raw_logprobs)
-        return (hypothesis_name, normalised_probs)
+        return (item, normalised_probs)

@@ -27,30 +27,26 @@ async def run_task(
     current_node = root
     final_path.append(str(current_node))
 
-    while not is_terminal(current_node, task):
-        await expand_evidence(
-            current_node, 0, task, question_clustering, min_probability
-        )
-
-        if not current_node.children:
-            logger.info(
-                "No further questions generated for %s; treating node as terminal.",
-                str(current_node),
+    try:
+        while not is_terminal(current_node, task):
+            await expand_evidence(
+                current_node, 0, task, question_clustering, min_probability
             )
-            break
 
-        best_question_node = max(
-            current_node.children,
-            key=partial(expected_reward, sharpness_constant=sharpness_constant),
-        )
-        logger.info(f"Selected question node: {str(best_question_node)}")
-        final_path.append(str(best_question_node))
+            best_question_node = max(
+                current_node.children,
+                key=partial(expected_reward, sharpness_constant=sharpness_constant),
+            )
+            logger.info(f"Selected question node: {str(best_question_node)}")
+            final_path.append(str(best_question_node))
 
-        # Get question answer and move ahead
-        selected_evidence_node = await task.get_answer(best_question_node)
-        logger.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
-        current_node = selected_evidence_node
-        final_path.append(str(current_node))
+            # Get question answer and move ahead
+            selected_evidence_node = await task.get_answer(best_question_node)
+            logger.info(f"Benchmark LLM selected: {str(selected_evidence_node)}")
+            current_node = selected_evidence_node
+            final_path.append(str(current_node))
+    except Exception as e:
+        logger.error("Something went wrong", e)
 
     end_time = datetime.now()
     logger.info(
@@ -82,13 +78,7 @@ async def expand_evidence(
         return
 
     if not current_node.children:
-        try:
-            new_questions = await task.create_questions(current_node)
-        except ValueError as exc:
-            logger.info(
-                "Failed to generate questions for %s: %s", str(current_node), exc
-            )
-            return
+        new_questions = await task.create_questions(current_node)
         new_question_nodes = [
             QuestionNode(q, answers, current_node)
             for q, answers in new_questions.items()
@@ -138,6 +128,7 @@ async def expand_questions(
                 likelihoods,
                 min_probability,
                 1 / len(answers),
+                task.estimator_confidence,
             )
             evidence_node = EvidenceNode(
                 answer=answer,
@@ -162,9 +153,14 @@ def calculate_posterior(
     likelihoods: dict[str, float],
     min_probability: float,
     uniform_likelihood: float,
+    estimator_confidence: float,
 ) -> tuple[dict[str, float], float]:
     all_posteriors = {
-        h: p * (likelihoods.get(h, uniform_likelihood) * 0.7 + uniform_likelihood * 0.3)
+        h: p
+        * (
+            likelihoods.get(h, uniform_likelihood) * estimator_confidence
+            + uniform_likelihood * (1 - estimator_confidence)
+        )
         for h, p in prior.items()
     }
 

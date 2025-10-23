@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import re
-import string
+
+import numpy as np
 from globals import SENTENCE_TRANSFORMER
 
 from models import LLMRequestSession
@@ -9,17 +10,14 @@ from node import EvidenceNode, QuestionNode
 
 
 class Task(ABC):
-    """Abstract base class for all tasks that can be solved by UoT methods.
-    Prompts and parsers are separated so that LLM calls remain independent of
-    tasks and can be robustly tracked for history."""
-
     questioner_session: LLMRequestSession
     answerer_session: LLMRequestSession
     task_answer: str
-    max_question_nodes: int  # Max number of questions to generate at each step
+    max_question_nodes: int
     max_lookahead_depth: int
     max_conversation_depth: int
     confidence_threshold: float
+    estimator_confidence: float
     hypothesis_space: list[str]
 
     def __init__(
@@ -31,6 +29,7 @@ class Task(ABC):
         max_lookahead_depth: int,
         max_conversation_depth: int,
         confidence_threshold: float,
+        estimator_confidence: float,
         hypothesis_space: list[str],
     ):
         self.questioner_session = questioner_session
@@ -40,6 +39,7 @@ class Task(ABC):
         self.max_lookahead_depth = max_lookahead_depth
         self.max_conversation_depth = max_conversation_depth
         self.confidence_threshold = confidence_threshold
+        self.estimator_confidence = estimator_confidence
         self.hypothesis_space = hypothesis_space
 
     @abstractmethod
@@ -62,7 +62,31 @@ class Task(ABC):
     async def get_answer(self, current_node: QuestionNode) -> EvidenceNode:
         pass
 
-    # TODO: Create __str__
+
+def normalise_logprobs(logprobs_dict: dict[str, float]) -> dict[str, float]:
+    """
+    Converts a dictionary of logprobs into a normalised
+    probability distribution.
+    """
+    keys = list(logprobs_dict.keys())
+    logprobs_array = np.array(list(logprobs_dict.values()))
+
+    max_logprob = np.max(logprobs_array)
+
+    # If all logprobs are near 0, then return uniform
+    if max_logprob == -np.inf:
+        num_keys = len(keys)
+        if num_keys == 0:
+            return {}
+        return {key: 1.0 / num_keys for key in keys}
+
+    shifted_logprobs = logprobs_array - max_logprob
+    exp_logprobs = np.exp(shifted_logprobs)
+    sum_exp_logprobs = np.sum(exp_logprobs)
+
+    normalised_probs = exp_logprobs / sum_exp_logprobs
+
+    return {key: float(prob) for key, prob in zip(keys, normalised_probs)}
 
 
 @dataclass
@@ -71,51 +95,45 @@ class Question:
     possible_answers: list[str]
 
 
-def parse_questions(output: str) -> list[Question]:
-    pattern = re.compile(
-        r"(\d+)\.\s*(.+?)[\|;](.+?)(?=(?:\n\d+\.|$))", re.MULTILINE | re.DOTALL
-    )
-    matches = pattern.findall(output)
+def parse_multi_questions(output: str) -> list[Question]:
+    output.replace("\\n", "\n")
 
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.remove("|")
+    questions: list[Question] = []
 
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
+    # Regex to find lines starting with optional whitespace, one or more digits,
+    # a period, more whitespace, and then captures the rest of the line.
+    question_pattern = re.compile(r"^\s*\d+\.\s+(.*)")
 
-    questions = []
-    for _, question_text, answers_text in matches:
-        question = question_text.strip()
-        possible_answers = [sanitise(a) for a in answers_text.split(";") if sanitise(a)]
-        if question and possible_answers:
+    for line in output.splitlines():
+        match = question_pattern.match(line)
+        if match:
+            # group(1) contains the captured question text
+            question_text = match.group(1).strip()
+            question_text, *possible_answers = question_text.split("|")
             questions.append(
-                Question(question=question, possible_answers=possible_answers)
+                Question(question=question_text, possible_answers=possible_answers)
             )
-
-    if not questions:
-        raise ValueError(f"No valid questions found in the output: {output}")
 
     return questions
 
 
 def parse_binary_questions(output: str) -> list[Question]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\n\d+\.|$))", re.MULTILINE | re.DOTALL)
-    matches = pattern.findall(output)
+    output.replace("\\n", "\n")
 
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.remove("|")
+    questions: list[Question] = []
 
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
+    # Regex to find lines starting with optional whitespace, one or more digits,
+    # a period, more whitespace, and then captures the rest of the line.
+    question_pattern = re.compile(r"^\s*\d+\.\s+(.*)")
 
-    questions = [
-        Question(question=sanitise(q_text), possible_answers=["Yes", "No"])
-        for _, q_text in matches
-        if sanitise(q_text)
-    ]
-
-    if not questions:
-        raise ValueError(f"No valid questions found in the output: {output}")
+    for line in output.splitlines():
+        match = question_pattern.match(line)
+        if match:
+            # group(1) contains the captured question text
+            question_text = match.group(1).strip()
+            questions.append(
+                Question(question=question_text, possible_answers=["Yes", "No"])
+            )
 
     return questions
 
@@ -126,157 +144,33 @@ class Likelihood:
     likelihoods: list[float]
 
 
-def parse_likelihoods(output: str) -> list[Likelihood]:
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.remove("|")
-
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
-
-    pattern = re.compile(r"\d+\.\s*([^|]+)\|([\d.;]+)", re.MULTILINE)
-    matches = pattern.findall(output)
-
-    if not matches:
-        raise ValueError(f"No valid likelihoods found in the output: {output}")
-
-    likelihoods_list = []
-    for hypothesis, probs_text in matches:
-        sanitised_hypothesis = sanitise(hypothesis)
-        probs = [
-            max(min(float(p.strip()), 1 - 0.01), 0.01)
-            for p in probs_text.split(";")
-            if p.strip()
-        ]
-        total = sum(probs)
-        normalised_probs = [p / total for p in probs] if total > 0 else probs
-        likelihoods_list.append(
-            Likelihood(hypothesis=sanitised_hypothesis, likelihoods=normalised_probs)
-        )
-
-    return likelihoods_list
-
-
 def parse_categorical_likelihoods(
     output: str, possible_answers: list[str]
 ) -> list[Likelihood]:
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.discard("|")
+    output = output.replace("\\n", "\n")
 
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
+    label_to_items: dict[str, list[str]] = {}
 
-    # Work on a copy so we can safely pop answers as they're matched
-    sanitised_possible_answers = [sanitise(a) for a in possible_answers]
+    # Match lines like "Label: item1, item2"
+    line_pattern = re.compile(r"^\s*([^:]+):\s*(.*)$")
 
-    pattern = re.compile(r"^([^:]+):\s*(.*?)\s*Count", re.MULTILINE)
-    matches = pattern.findall(output)
+    for line in output.splitlines():
+        if match := line_pattern.match(line):
+            label = match.group(1).strip()
+            items = [s.strip() for s in match.group(2).split(",") if s.strip()]
+            label_to_items[label] = items
 
-    if not matches:
-        raise ValueError(
-            f"No valid categorical likelihoods found in the output: {output}"
-        )
+    all_items = sorted({item for items in label_to_items.values() for item in items})
 
-    likelihoods_list: list[Likelihood] = []
-    for answer_label, hypotheses_str in matches:
-        sanitised_answer = sanitise(answer_label)
+    likelihoods: list[Likelihood] = []
 
-        # Step 1: Try exact match
-        if sanitised_answer in sanitised_possible_answers:
-            idx = sanitised_possible_answers.index(sanitised_answer)
-        else:
-            # Step 2: Fall back to semantic similarity
-            answer_embeddings = SENTENCE_TRANSFORMER.encode(
-                sanitised_possible_answers,
-                convert_to_tensor=True,
-                normalize_embeddings=True,
-            )
-            query_embedding = SENTENCE_TRANSFORMER.encode(
-                [sanitised_answer], convert_to_tensor=True, normalize_embeddings=True
-            )
-            similarities = SENTENCE_TRANSFORMER.similarity(
-                query_embedding, answer_embeddings
-            ).squeeze(0)
-            idx = int(similarities.argmax().item())
+    for item in all_items:
+        vector = [
+            1.0 if item in label_to_items[label] else 1e-5 for label in possible_answers
+        ]
+        likelihoods.append(Likelihood(hypothesis=item, likelihoods=vector))
 
-        # Step 3: Remove matched answer to avoid duplicates
-        sanitised_possible_answers.pop(idx)
-
-        hypotheses = [sanitise(h) for h in hypotheses_str.split(",") if sanitise(h)]
-
-        for hypothesis in hypotheses:
-            # Build one-hot vector
-            raw_vector = [
-                1.0 if i == idx else 0.0 for i in range(len(possible_answers))
-            ]
-
-            # Clamp and normalise
-            clamped = [max(min(val, 1 - 0.01), 0.01) for val in raw_vector]
-            total = sum(clamped)
-            normalised = [val / total for val in clamped] if total > 0 else clamped
-
-            likelihoods_list.append(
-                Likelihood(hypothesis=hypothesis, likelihoods=normalised)
-            )
-
-    if not likelihoods_list:
-        raise ValueError(f"No valid hypotheses extracted from output: {output}")
-
-    return likelihoods_list
-
-
-@dataclass
-class Probability:
-    hypothesis: str
-    probability: float
-
-
-def parse_probabilities(output: str) -> list[Probability]:
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.discard("|")
-
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
-
-    pattern = re.compile(r"\d+\.\s*([^|]+)\|([\d.]+)", re.MULTILINE)
-    matches = pattern.findall(output)
-
-    if not matches:
-        raise ValueError(f"No valid probabilities found in the output: {output}")
-
-    probabilities = []
-    for hypothesis, prob_text in matches:
-        sanitised_hypothesis = sanitise(hypothesis)
-        probability = max(min(float(prob_text.strip()), 1 - 0.01), 0.01)
-        probabilities.append(
-            Probability(hypothesis=sanitised_hypothesis, probability=probability)
-        )
-
-    total = sum(p.probability for p in probabilities)
-    if total > 0:
-        for p in probabilities:
-            p.probability /= total
-
-    return probabilities
-
-
-def parse_uniform_probabilities(output: str) -> list[Probability]:
-    pattern = re.compile(r"(\d+)\.\s*(.+?)(?=(?:\d+\.|$))", re.DOTALL)
-    matches = pattern.findall(output)
-
-    allowed_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
-    allowed_chars.remove("|")
-
-    def sanitise(text: str) -> str:
-        return "".join(c for c in text if c in allowed_chars).strip()
-
-    hypotheses = [sanitise(h) for _, h in matches if sanitise(h)]
-    if not hypotheses:
-        raise ValueError(f"No valid hypotheses found in the output: {output}")
-
-    n = len(hypotheses)
-    uniform_prob = 1.0 / n
-
-    return [Probability(hypothesis=h, probability=uniform_prob) for h in hypotheses]
+    return likelihoods
 
 
 def parse_answer(output: str, question_node: QuestionNode) -> EvidenceNode:

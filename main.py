@@ -13,23 +13,13 @@ from history import (
 import method
 from models import LLMRequestSession
 from question_clustering import QuestionClustering
+
+from tasks.detective_cases.baseline import Baseline
 from tasks.detective_cases.bayesian import Bayesian
+from tasks.detective_cases.bayesian_multi import BayesianWithMultibranching
 from tasks.detective_cases.data import load_all_data
 from tasks.detective_cases.direct import Direct
 from tasks.direct_prompting_task import DirectPromptingTask
-# from tasks.med_dg.baseline import Baseline
-# from tasks.med_dg.baseline_multi import BaselineWithMultibranching
-# from tasks.med_dg.bayesian import Bayesian
-# from tasks.med_dg.bayesian_multi import BayesianWithMultibranching
-# from tasks.med_dg.data import load_balanced_data
-# from tasks.med_dg.direct import Direct
-# from tasks.movie_lens.bayesian import Bayesian
-# from tasks.movie_lens.direct import Direct
-# from tasks.movie_lens.data import load_dataset
-from tasks.twenty_questions.bayesian_logprobs import BayesianLogProbs
-from tasks.twenty_questions.bayesian import Bayesian
-from tasks.twenty_questions.data import COMMON as entities
-from tasks.twenty_questions.direct import Direct
 from tasks.task import Task
 
 logger = logging.getLogger("Main")
@@ -37,35 +27,34 @@ logger = logging.getLogger("Main")
 
 async def main(output_dir: Path) -> None:
     # =============== CONFIG ===============
-    questioner_model_key = "deepseek_chat"
-    answerer_model_key = "deepseek_reasoner"
+    questioner_model_key = "deepseek-chat"
+    answerer_model_key = "deepseek-reasoner"
     sharpness_constant = 0.4
-    min_probability = 1 / 10_000
-    max_concurrent = 8
-    clustering_threshold = 0.99
-    shared_question_cluster = True
-    dataset = entities
-    start_idx = 50
-    end_idx = len(entities)
+    min_probability = 1 / 25_000
+    max_concurrent = 6
+    clustering_threshold = 1.0
+    shared_question_cluster = False
+    dataset = load_all_data()
+    start_idx = 1
+    end_idx = 100
     conversation_depth = 20
 
     tasks = [
-        BayesianLogProbs(
+        Baseline(
             questioner_session=LLMRequestSession(questioner_model_key),
             answerer_session=LLMRequestSession(answerer_model_key),
-            task_answer=item,
-            max_question_nodes=3,
-            max_lookahead_depth=2,
+            instance=item,
+            max_question_nodes=2,
+            max_lookahead_depth=3,
             max_conversation_depth=conversation_depth,
-            confidence_threshold=0.8,
-            hypothesis_space=entities
+            confidence_threshold=1.0,
+            estimator_confidence=1.0,
         )
         # Direct(
         #     questioner_session=LLMRequestSession(questioner_model_key),
         #     answerer_session=LLMRequestSession(answerer_model_key),
-        #     task_answer=item,
+        #     instance=item,
         #     max_conversation_depth=conversation_depth,
-        #     hypothesis_space=entities
         # )
         for item in dataset[start_idx:end_idx]
     ]
@@ -164,7 +153,7 @@ async def run_direct_prompting_task(
 
 
 if __name__ == "__main__":
-    output_dir = Path(f"logs/COMMON_LOGPROBS_ALL_deepseek32_deepseekr1_tuning")
+    output_dir = Path(f"logs/{datetime.now().strftime('%Y%m%d%H%M%S')}")
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -176,17 +165,3 @@ if __name__ == "__main__":
         force=True,
     )
     asyncio.run(main(output_dir))
-    # questioner_model_key = "deepseek_chat"
-    # answerer_model_key = "deepseek_reasoner"
-    # data = load_dataset(personas_per_instance=10)
-    # print(len(data))
-    # task = Bayesian(
-    #     questioner_session=LLMRequestSession(questioner_model_key),
-    #     answerer_session=LLMRequestSession(answerer_model_key),
-    #     instance=data[0],
-    #     max_question_nodes=3,
-    #     max_lookahead_depth=3,
-    #     max_conversation_depth=5,
-    #     confidence_threshold=1
-    # )
-    # print(task._questioner_preamble)

@@ -15,11 +15,6 @@ class Question:
     value: str
 
 
-@dataclass
-class Recommendations:
-    values: tuple[str, ...]
-
-
 class DirectPromptingTask(ABC):
     questioner_session: LLMRequestSession
     answerer_session: LLMRequestSession
@@ -44,13 +39,9 @@ class DirectPromptingTask(ABC):
     @abstractmethod
     async def query_questioner(
         self, current_node: EvidenceNode
-    ) -> Question | Prediction | Recommendations:
+    ) -> Question | Prediction:
         pass
 
     @abstractmethod
     async def query_answerer(self, question: str) -> str:
         pass
-
-    def is_correct_signal(self, question: str, answer: str) -> bool:
-        """Return True when the provided answer indicates the task is solved."""
-        return False
