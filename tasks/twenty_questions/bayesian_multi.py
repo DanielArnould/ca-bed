@@ -8,15 +8,15 @@ from models import (
     get_top_logprobs_for_messages,
 )
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.task import (
-    Task,
+from tasks.tree_task import (
+    TreeTask,
     normalise_logprobs,
     parse_answer,
     parse_multi_questions,
 )
 
 
-class BayesianWithMultibranching(Task):
+class BayesianWithMultibranching(TreeTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,
@@ -143,7 +143,7 @@ class BayesianWithMultibranching(Task):
                 target_answers=answers,
             )
             likelihoods[item] = probs
-            
+
         # results = await asyncio.gather(*tasks)
         return likelihoods
 

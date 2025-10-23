@@ -4,15 +4,15 @@ from models import LLMRequestSession, get_response
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.detective_cases.common import get_case_background, parse_question
 from tasks.detective_cases.data import DetectiveCasesInstance
-from tasks.task import (
-    Task,
+from tasks.tree_task import (
+    TreeTask,
     parse_answer,
     parse_binary_questions,
     parse_categorical_likelihoods,
 )
 
 
-class Baseline(Task):
+class UoT(TreeTask):
     instance: DetectiveCasesInstance
     background_info: str
     suspects_info: str
@@ -58,7 +58,7 @@ class Baseline(Task):
 
     def __str__(self) -> str:
         return (
-            "Detective Cases (Baseline): "
+            "Detective Cases (UoT): "
             f"{self.questioner_session.model_key=} "
             f"{self.answerer_session.model_key=} "
             f"{self.max_question_nodes=} "

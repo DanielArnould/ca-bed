@@ -6,13 +6,13 @@ from history import RunRecord, serialise_evidence_node
 from node import EvidenceNode, QuestionNode, get_conversation_depth
 from question_clustering import QuestionClustering
 from rewards import expected_reward
-from tasks.task import Task
+from tasks.tree_task import TreeTask
 
 logger = logging.getLogger("Method")
 
 
 async def run_task(
-    task: Task,
+    task: TreeTask,
     question_clustering: QuestionClustering,
     sharpness_constant: float,
     min_probability: float,
@@ -70,7 +70,7 @@ async def run_task(
 async def expand_evidence(
     current_node: EvidenceNode,
     current_depth: int,
-    task: Task,
+    task: TreeTask,
     question_clustering: QuestionClustering,
     min_probability: float,
 ) -> None:
@@ -98,7 +98,7 @@ async def expand_evidence(
 async def expand_questions(
     current_node: QuestionNode,
     current_depth: int,
-    task: Task,
+    task: TreeTask,
     question_clustering: QuestionClustering,
     min_probability: float,
 ) -> None:
@@ -183,7 +183,7 @@ def calculate_posterior(
     return normalised, marginal
 
 
-def is_terminal(node: EvidenceNode, task: Task) -> bool:
+def is_terminal(node: EvidenceNode, task: TreeTask) -> bool:
     return get_conversation_depth(node) >= task.max_conversation_depth or any(
         prob >= task.confidence_threshold for prob in node.belief_state.values()
     )

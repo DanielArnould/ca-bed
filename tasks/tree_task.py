@@ -9,7 +9,7 @@ from models import LLMRequestSession
 from node import EvidenceNode, QuestionNode
 
 
-class Task(ABC):
+class TreeTask(ABC):
     questioner_session: LLMRequestSession
     answerer_session: LLMRequestSession
     task_answer: str

@@ -2,17 +2,17 @@ from textwrap import dedent
 from typing import override
 
 from tenacity import retry, stop_after_attempt
-from models import LLMRequestSession, query_llm
+from models import LLMRequestSession
 from node import EvidenceNode, QuestionNode, get_conversation_history
-from tasks.task import (
-    Task,
+from tasks.tree_task import (
+    TreeTask,
     parse_answer,
     parse_binary_questions,
     parse_categorical_likelihoods,
 )
 
 
-class Baseline(Task):
+class UoT(TreeTask):
     def __init__(
         self,
         questioner_session: LLMRequestSession,
@@ -32,10 +32,11 @@ class Baseline(Task):
             max_conversation_depth=max_conversation_depth,
             confidence_threshold=1.0,
             hypothesis_space=hypothesis_space,
+            estimator_confidence=1.0,
         )
 
     def __str__(self) -> str:
-        return f"Twenty Questions (Non-Bayesian): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=}"
+        return f"Twenty Questions (UoT): {self.task_answer=} {self.max_question_nodes=} {self.max_lookahead_depth=} {self.max_conversation_depth=} {self.hypothesis_space=}"
 
     @override
     async def create_initial_belief_state(self) -> dict[str, float]:

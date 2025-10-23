@@ -10,15 +10,15 @@ from models import (
 from node import EvidenceNode, QuestionNode, get_conversation_history
 from tasks.detective_cases.common import get_case_background, parse_question
 from tasks.detective_cases.data import DetectiveCasesInstance
-from tasks.task import (
-    Task,
+from tasks.tree_task import (
+    TreeTask,
     normalise_logprobs,
     parse_answer,
     parse_multi_questions,
 )
 
 
-class BayesianWithMultibranching(Task):
+class BayesianWithMultibranching(TreeTask):
     instance: DetectiveCasesInstance
     background_info: str
     suspects_info: str
