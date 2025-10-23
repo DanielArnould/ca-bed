@@ -1,4 +1,3 @@
-import asyncio
 from textwrap import dedent
 from typing import override
 
@@ -93,7 +92,7 @@ class TwentyQuestionsBayesianWithMultibranching(TreeTask):
             )
 
         parts.append(
-            dedent(f"""\
+            dedent("""\
             ### Task
             Generate questions that help differentiate the remaining candidates. Each question must:
             - Start with EXACTLY 'Is X' and be answerable truthfully about the secret entity.
@@ -131,7 +130,6 @@ class TwentyQuestionsBayesianWithMultibranching(TreeTask):
     async def get_likelihoods(
         self, question: str, answers: list[str], hypotheses: list[str]
     ) -> dict[str, dict[str, float]]:
-        tasks = []
         likelihoods = {}
         for hypothesis_name in hypotheses:
             if hypothesis_name not in self.hypothesis_space:
@@ -144,7 +142,6 @@ class TwentyQuestionsBayesianWithMultibranching(TreeTask):
             )
             likelihoods[item] = probs
 
-        # results = await asyncio.gather(*tasks)
         return likelihoods
 
     @override
