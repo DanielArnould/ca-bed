@@ -6,7 +6,6 @@ from pathlib import Path
 
 import direct_prompting_method
 from history import (
-    load_question_clustering,
     save_question_clustering,
     serialise_run_record,
 )
