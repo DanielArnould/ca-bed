@@ -1,6 +1,6 @@
 import math
 
-from src.ca_bed.node import EvidenceNode, ProbabilityDistribution, QuestionNode
+from ca_bed.node import EvidenceNode, ProbabilityDistribution, QuestionNode
 
 
 def shannon_entropy(belief_state: ProbabilityDistribution) -> float:
