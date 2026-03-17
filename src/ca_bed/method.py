@@ -10,7 +10,6 @@ from ca_bed.node import (
     ProbabilityDistribution,
     QuestionNode,
     get_conversation_depth,
-    get_conversation_history,
 )
 from ca_bed.rewards import reward
 from ca_bed.tasks.task import Task
@@ -50,16 +49,16 @@ async def run_task(
 
             best_question_node = max(current_node.children, key=reward)
             answer = await task.get_answer(
-                best_question_node.question,
-                best_question_node.possible_answers,
+                best_question_node,
                 answerer_llm,
             )
             current_node = next(
                 child for child in best_question_node.children if child.answer == answer
             )
     except Exception:
-        logger.exception("What!?")
+        logger.bind(task_id=task.get_id()).exception("What!?")
 
+    final_path.append(current_node)
     return RunRecord(task=task, final_path=final_path)
 
 
@@ -81,7 +80,7 @@ async def expand_evidence(
 
     if not current_node.children:
         new_questions = await task.create_questions(
-            get_conversation_history(current_node), n_questions, questioner_llm
+            current_node, n_questions, questioner_llm
         )
         new_question_nodes = [
             QuestionNode(q, answers, current_node)
@@ -117,9 +116,7 @@ async def expand_questions(
     max_lookahead_depth: int,
 ) -> None:
     if not current_node.children:
-        new_likelihoods = await task.get_likelihoods(
-            current_node.question, current_node.possible_answers, questioner_llm
-        )
+        new_likelihoods = await task.get_likelihoods(current_node, questioner_llm)
 
         for answer, likelihoods in new_likelihoods.items():
             posterior, marginal = calculate_posterior(

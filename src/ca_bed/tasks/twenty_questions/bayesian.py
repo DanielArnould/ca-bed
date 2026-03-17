@@ -4,7 +4,13 @@ from typing import override
 
 
 from ca_bed.llm import LLM, get_response
-from ca_bed.node import ProbabilityDistribution, QuestionAnswer
+from ca_bed.node import (
+    EvidenceNode,
+    ProbabilityDistribution,
+    QuestionAnswer,
+    QuestionNode,
+    get_conversation_history,
+)
 from ca_bed.tasks.task import Task
 
 
@@ -31,10 +37,14 @@ class TwentyQuestionsBayesian(Task):
 
     @override
     async def create_questions(
-        self, conversation_history: list[QuestionAnswer], n_questions: int, llm: LLM
+        self, curr: EvidenceNode, n_questions: int, llm: LLM
     ) -> dict[str, list[str]]:
+        possible_entities = [
+            entity for entity, prob in curr.belief_state.items() if prob > 0
+        ]
+        conversation_history = get_conversation_history(curr)
         prompt = build_question_generation_prompt(
-            conversation_history, self.entities, n_questions
+            conversation_history, possible_entities, n_questions
         )
 
         response = await get_response(prompt, llm, self.get_id())
@@ -43,9 +53,9 @@ class TwentyQuestionsBayesian(Task):
 
     @override
     async def get_likelihoods(
-        self, question: str, answers: list[str], llm
+        self, curr: QuestionNode, llm: LLM
     ) -> dict[str, dict[str, float]]:
-        prompt = build_likelihood_prompt(question, self.entities)
+        prompt = build_likelihood_prompt(curr.question, self.entities)
 
         response = await get_response(prompt, llm, self.get_id())
         likelihoods = parse_likelihood_response(response)
@@ -55,8 +65,8 @@ class TwentyQuestionsBayesian(Task):
         }
 
     @override
-    async def get_answer(self, question: str, answers: list[str], llm: LLM) -> str:
-        prompt = build_answer_prompt(self.secret_entity, question)
+    async def get_answer(self, curr: QuestionNode, llm: LLM) -> str:
+        prompt = build_answer_prompt(self.secret_entity, curr.question)
         response = await get_response(prompt, llm, self.get_id())
         answer = parse_answer_response(response)
         return answer

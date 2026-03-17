@@ -5,6 +5,7 @@ import random
 import sys
 
 from loguru import logger
+from tqdm.asyncio import tqdm
 
 from ca_bed.llm import LLM
 from ca_bed.method import run_task
@@ -13,6 +14,8 @@ from ca_bed.tasks.twenty_questions.data import TWENTY_QUESTIONS_ENTITIES
 from ca_bed.tasks.task import Task
 
 from asyncio import Semaphore
+
+from ca_bed.tasks.twenty_questions.uot import TwentyQuestionsUoT
 
 
 async def run_and_save_task(
@@ -49,8 +52,8 @@ async def run_and_save_task(
 
 
 async def main() -> None:
-    results_dir = Path("results/")
-    results_dir.mkdir(parents=True, exist_ok=True)
+    results_dir = Path("results4/")
+    results_dir.mkdir(parents=True, exist_ok=False)
     logger.remove(0)
 
     global_log_file = results_dir / "log.log"
@@ -65,25 +68,26 @@ async def main() -> None:
 
     random.seed(42)
     n_questions = 3
-    max_conversation_depth = 2
-    max_lookahead_depth = 1
+    max_conversation_depth = 10
+    max_lookahead_depth = 2
     confidence_threshold = 0.9
-    max_concurrent_tasks = 2
+    max_concurrent_tasks = 8
 
     secret_entities = random.sample(
         TWENTY_QUESTIONS_ENTITIES, len(TWENTY_QUESTIONS_ENTITIES)
     )
 
     tasks: list[Task] = [
-        TwentyQuestionsBayesian(
+        TwentyQuestionsUoT(
             secret_entity=secret_entity,
             entities=secret_entities,
         )
-        for secret_entity in secret_entities[:4]
+        for secret_entity in [secret_entities[0]]
     ]
 
     semaphore = Semaphore(max_concurrent_tasks)
-    await asyncio.gather(
+
+    await tqdm.gather(
         *[
             run_and_save_task(
                 task=task,
@@ -97,13 +101,15 @@ async def main() -> None:
                 semaphore=semaphore,
             )
             for task in tasks
-        ]
+        ],
+        desc="Running tasks",
+        total=len(tasks),
     )
 
     logger.info(f"Total questioner input tokens: {questioner_llm.total_input_tokens}")
     logger.info(f"Total questioner output tokens: {questioner_llm.total_output_tokens}")
     logger.info(f"Total answerer input tokens: {answerer_llm.total_input_tokens}")
-    logger.info(f"Total answerer output tokens: {answerer_llm.total_input_tokens}")
+    logger.info(f"Total answerer output tokens: {answerer_llm.total_output_tokens}")
 
 
 if __name__ == "__main__":

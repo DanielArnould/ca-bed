@@ -17,6 +17,8 @@ platforms = ["win-64"]
 ca_bed = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+experiments = "python src/ca_bed/experiments.py"
+analysis = "python src/ca_bed/analysis.py"
 
 [tool.pixi.dependencies]
 openai = ">=2.26.0,<3"

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from ca_bed.llm import LLM
-from ca_bed.node import ProbabilityDistribution, QuestionAnswer
+from ca_bed.node import EvidenceNode, ProbabilityDistribution, QuestionNode
 
 
 class Task(ABC):
@@ -16,13 +16,13 @@ class Task(ABC):
 
     @abstractmethod
     async def create_questions(
-        self, conversation_history: list[QuestionAnswer], n_questions: int, llm: LLM
+        self, curr: EvidenceNode, n_questions: int, llm: LLM
     ) -> dict[str, list[str]]: ...
 
     @abstractmethod
     async def get_likelihoods(
-        self, question: str, answers: list[str], llm: LLM
+        self, curr: QuestionNode, llm: LLM
     ) -> dict[str, dict[str, float]]: ...
 
     @abstractmethod
-    async def get_answer(self, question: str, answers: list[str], llm: LLM) -> str: ...
+    async def get_answer(self, curr: QuestionNode, llm: LLM) -> str: ...

@@ -4,11 +4,17 @@ from typing import override
 
 
 from ca_bed.llm import LLM, get_response
-from ca_bed.node import ProbabilityDistribution, QuestionAnswer
+from ca_bed.node import (
+    EvidenceNode,
+    ProbabilityDistribution,
+    QuestionAnswer,
+    QuestionNode,
+    get_conversation_history,
+)
 from ca_bed.tasks.task import Task
 
 
-class TwentyQuestionsBayesian(Task):
+class TwentyQuestionsUoT(Task):
     def __init__(
         self,
         secret_entity: str,
@@ -19,7 +25,7 @@ class TwentyQuestionsBayesian(Task):
 
     @override
     def get_id(self) -> str:
-        return f"20q_bayesian_{self.secret_entity}"
+        return f"20q_uot_{self.secret_entity}"
 
     @override
     def get_expected_answer(self) -> str:
@@ -31,10 +37,14 @@ class TwentyQuestionsBayesian(Task):
 
     @override
     async def create_questions(
-        self, conversation_history: list[QuestionAnswer], n_questions: int, llm: LLM
+        self, curr: EvidenceNode, n_questions: int, llm: LLM
     ) -> dict[str, list[str]]:
+        possible_entities = [
+            entity for entity, prob in curr.belief_state.items() if prob > 0
+        ]
+        conversation_history = get_conversation_history(curr)
         prompt = build_question_generation_prompt(
-            conversation_history, self.entities, n_questions
+            conversation_history, possible_entities, n_questions
         )
 
         response = await get_response(prompt, llm, self.get_id())
@@ -43,9 +53,9 @@ class TwentyQuestionsBayesian(Task):
 
     @override
     async def get_likelihoods(
-        self, question: str, answers: list[str], llm
+        self, curr: QuestionNode, llm: LLM
     ) -> dict[str, dict[str, float]]:
-        prompt = build_likelihood_prompt(question, self.entities)
+        prompt = build_likelihood_prompt(curr.question, self.entities)
 
         response = await get_response(prompt, llm, self.get_id())
         likelihoods = parse_likelihood_response(response)
@@ -55,8 +65,8 @@ class TwentyQuestionsBayesian(Task):
         }
 
     @override
-    async def get_answer(self, question: str, answers: list[str], llm: LLM) -> str:
-        prompt = build_answer_prompt(self.secret_entity, question)
+    async def get_answer(self, curr: QuestionNode, llm: LLM) -> str:
+        prompt = build_answer_prompt(self.secret_entity, curr.question)
         response = await get_response(prompt, llm, self.get_id())
         answer = parse_answer_response(response)
         return answer
@@ -104,20 +114,20 @@ def build_likelihood_prompt(question: str, entities: list[str]) -> str:
             You are analysing a game of 20 questions. The question
             asked was "{question}". The possible answers are "Yes" and "No". The
             possible entities are: {possible_entities_str}. For each entity,
-            assuming it was the answer, how likely is it that the answerer would
-            answer yes? First, provide a short explanation of your reasoning.
-            Then provide the result strictly in the following format, including the double
+            assuming it was the answer, what answer would the answerer give?
+            First, provide a short explanation of your reasoning. Then provide
+            the result strictly in the following format, including the double
             hashtag.
 
-            ##Apple##: <a single number between 0 and 1>
-            ##Bee##: <a single number between 0 and 1>""").strip()
+            ##Apple##: <'Yes' or 'No'>
+            ##Bee##: <'Yes' or 'No'>""").strip()
 
 
 def parse_likelihood_response(response: str) -> dict[str, float]:
-    likelihood_regex = r"##(.*)##[^#]*:[^ ]* (\d+(?:\.\d+)?)"
+    likelihood_regex = r"##(.*)##[^#]*:[^ ]* (Yes|No)"
     return {
-        key: float(likelihood)
-        for key, likelihood in re.findall(likelihood_regex, response)
+        key: 1.0 if answer == "Yes" else 0.0
+        for key, answer in re.findall(likelihood_regex, response)
     }
 
 

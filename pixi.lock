@@ -155,7 +155,7 @@ packages:
 - pypi: ./
   name: ca-bed
   version: 0.1.0
-  sha256: f8809d6f221cc6a1c0ddea68a324883319d852d29e308554a4c3492d2f02a3fc
+  sha256: 2f634a246c3e4e276d03655a9168cafe8fb6ce70a2f632e42e890fc9b5f6cfca
   requires_python: '>=3.14'
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.2.25-h4c7d964_0.conda

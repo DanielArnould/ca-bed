@@ -73,7 +73,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    path: Path = args.paths
+    path: Path = args.path
 
     run_evals: list[RunEval] = []
 
