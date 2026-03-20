@@ -1,30 +1,24 @@
 import asyncio
+import math
 
 from loguru import logger
 
 from ca_bed.history import RunRecord
-from ca_bed.llm import LLM
 from ca_bed.node import (
     EvidenceNode,
     Likelihoods,
     ProbabilityDistribution,
     QuestionNode,
     get_conversation_depth,
+    get_conversation_history,
 )
-from ca_bed.rewards import reward
-from ca_bed.tasks.task import Task
+from ca_bed.tasks.task import TreeBasedTask
 
 
 async def run_task(
-    task: Task,
-    questioner_llm: LLM,
-    answerer_llm: LLM,
-    n_questions: int,
-    max_conversation_depth: int,
-    max_lookahead_depth: int,
-    confidence_threshold: float,
+    task: TreeBasedTask,
 ) -> RunRecord:
-    initial_belief_state = await task.create_initial_belief_state()
+    initial_belief_state = task.create_uniform_belief_state()
     root = EvidenceNode(
         answer="ROOT", belief_state=initial_belief_state, marginal_likelihood=1.0
     )
@@ -33,30 +27,27 @@ async def run_task(
 
     try:
         while not is_terminal(
-            current_node, max_conversation_depth, confidence_threshold
+            current_node, task.max_conversation_depth, task.confidence_threshold
         ):
             final_path.append(current_node)
             await expand_evidence(
                 current_node=current_node,
                 current_depth=0,
                 task=task,
-                questioner_llm=questioner_llm,
-                n_questions=n_questions,
-                max_conversation_depth=max_conversation_depth,
-                confidence_threshold=confidence_threshold,
-                max_lookahead_depth=max_lookahead_depth,
             )
 
-            best_question_node = max(current_node.children, key=reward)
+            best_question_node = max(
+                current_node.children, key=expected_information_gain
+            )
             answer = await task.get_answer(
-                best_question_node,
-                answerer_llm,
+                best_question_node.question,
+                best_question_node.possible_answers,
             )
             current_node = next(
                 child for child in best_question_node.children if child.answer == answer
             )
     except Exception:
-        logger.bind(task_id=task.get_id()).exception("What!?")
+        logger.bind(task_id=task.get_id()).exception("An error in the method occurred")
 
     final_path.append(current_node)
     return RunRecord(task=task, final_path=final_path)
@@ -65,22 +56,19 @@ async def run_task(
 async def expand_evidence(
     current_node: EvidenceNode,
     current_depth: int,
-    task: Task,
-    questioner_llm: LLM,
-    n_questions: int,
-    max_conversation_depth: int,
-    confidence_threshold: float,
-    max_lookahead_depth: int,
+    task: TreeBasedTask,
 ) -> None:
     if (
-        is_terminal(current_node, max_conversation_depth, confidence_threshold)
-        or current_depth >= max_lookahead_depth
+        is_terminal(
+            current_node, task.max_conversation_depth, task.confidence_threshold
+        )
+        or current_depth >= task.max_lookahead_depth
     ):
         return
 
     if not current_node.children:
         new_questions = await task.create_questions(
-            current_node, n_questions, questioner_llm
+            get_conversation_history(current_node), current_node.belief_state
         )
         new_question_nodes = [
             QuestionNode(q, answers, current_node)
@@ -94,11 +82,6 @@ async def expand_evidence(
                 child,
                 current_depth,
                 task,
-                questioner_llm,
-                n_questions,
-                max_conversation_depth,
-                confidence_threshold,
-                max_lookahead_depth,
             )
             for child in current_node.children
         ]
@@ -108,15 +91,12 @@ async def expand_evidence(
 async def expand_questions(
     current_node: QuestionNode,
     current_depth: int,
-    task: Task,
-    questioner_llm: LLM,
-    n_questions: int,
-    max_conversation_depth: int,
-    confidence_threshold: float,
-    max_lookahead_depth: int,
+    task: TreeBasedTask,
 ) -> None:
     if not current_node.children:
-        new_likelihoods = await task.get_likelihoods(current_node, questioner_llm)
+        new_likelihoods = await task.get_likelihoods(
+            current_node.question, current_node.possible_answers
+        )
 
         for answer, likelihoods in new_likelihoods.items():
             posterior, marginal = calculate_posterior(
@@ -137,11 +117,6 @@ async def expand_questions(
                 child,
                 current_depth + 1,
                 task,
-                questioner_llm,
-                n_questions,
-                max_conversation_depth,
-                confidence_threshold,
-                max_lookahead_depth,
             )
             for child in current_node.children
         ]
@@ -164,8 +139,44 @@ def calculate_posterior(
 def is_terminal(
     node: EvidenceNode, max_conversation_depth: int, confidence_threshold: float
 ) -> bool:
-    return (
-        get_conversation_depth(node) >= max_conversation_depth
-        or any(prob >= confidence_threshold for prob in node.belief_state.values())
-        or len(node.belief_state) == 0
+    return get_conversation_depth(node) >= max_conversation_depth or any(
+        prob >= confidence_threshold for prob in node.belief_state.values()
     )
+
+
+def shannon_entropy(belief_state: ProbabilityDistribution) -> float:
+    return -sum(prob * math.log2(prob) for prob in belief_state.values() if prob > 0)
+
+
+def expected_final_entropy(node: EvidenceNode | QuestionNode) -> float:
+    """
+    Recursively calculates the expected entropy at the leaf nodes of a given path.
+    """
+    match node:
+        case QuestionNode():
+            # Expected entropy is the weighted sum of the entropies of possible answers
+            return sum(
+                evidence.marginal_likelihood * expected_final_entropy(evidence)
+                for evidence in node.children
+            )
+
+        case EvidenceNode():
+            if node.children:
+                # If we can ask more questions, pick the question that minimizes
+                # the expected final entropy.
+                return min(expected_final_entropy(child) for child in node.children)
+
+            # Base case (leaf node): The actual entropy at this terminating state
+            return shannon_entropy(node.belief_state)
+
+
+def expected_information_gain(candidate_question: QuestionNode) -> float:
+    """
+    Calculates the Expected Information Gain of asking a question,
+    accounting for the full lookahead depth.
+    """
+    parent = candidate_question.parent
+    starting_entropy = shannon_entropy(parent.belief_state)
+
+    # Information Gain = H(start) - H(expected_final)
+    return starting_entropy - expected_final_entropy(candidate_question)

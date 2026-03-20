@@ -8,7 +8,7 @@ from loguru import logger
 from tqdm.asyncio import tqdm
 
 from ca_bed.llm import LLM
-from ca_bed.method import run_task
+from ca_bed.methods.tree_based import run_task
 from ca_bed.tasks.twenty_questions.bayesian import TwentyQuestionsBayesian
 from ca_bed.tasks.twenty_questions.data import TWENTY_QUESTIONS_ENTITIES
 from ca_bed.tasks.task import Task
@@ -69,7 +69,7 @@ async def main() -> None:
     random.seed(42)
     n_questions = 3
     max_conversation_depth = 10
-    max_lookahead_depth = 2
+    max_lookahead_depth = 1
     confidence_threshold = 0.9
     max_concurrent_tasks = 8
 
@@ -78,7 +78,7 @@ async def main() -> None:
     )
 
     tasks: list[Task] = [
-        TwentyQuestionsUoT(
+        TwentyQuestionsBayesian(
             secret_entity=secret_entity,
             entities=secret_entities,
         )

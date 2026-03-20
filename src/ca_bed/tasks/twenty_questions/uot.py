@@ -3,61 +3,40 @@ from textwrap import dedent
 from typing import override
 
 
-from ca_bed.llm import LLM, get_response
+from ca_bed.llm import get_response
 from ca_bed.node import (
-    EvidenceNode,
-    ProbabilityDistribution,
     QuestionAnswer,
-    QuestionNode,
-    get_conversation_history,
 )
-from ca_bed.tasks.task import Task
+from ca_bed.tasks.task import TreeBasedTask
 
 
-class TwentyQuestionsUoT(Task):
-    def __init__(
-        self,
-        secret_entity: str,
-        entities: list[str],
-    ):
-        self.secret_entity = secret_entity
-        self.entities = entities
-
+class TwentyQuestionsUoT(TreeBasedTask):
     @override
     def get_id(self) -> str:
-        return f"20q_uot_{self.secret_entity}"
-
-    @override
-    def get_expected_answer(self) -> str:
-        return self.secret_entity
-
-    @override
-    async def create_initial_belief_state(self) -> ProbabilityDistribution:
-        return {entity: 1.0 / len(self.entities) for entity in self.entities}
+        return f"20q_uot_{self.task_answer}"
 
     @override
     async def create_questions(
-        self, curr: EvidenceNode, n_questions: int, llm: LLM
+        self, conversation_history: list[QuestionAnswer], belief_state: dict[str, float]
     ) -> dict[str, list[str]]:
         possible_entities = [
-            entity for entity, prob in curr.belief_state.items() if prob > 0
+            entity for entity, prob in belief_state.items() if prob > 0
         ]
-        conversation_history = get_conversation_history(curr)
         prompt = build_question_generation_prompt(
-            conversation_history, possible_entities, n_questions
+            conversation_history, possible_entities, self.n_questions
         )
 
-        response = await get_response(prompt, llm, self.get_id())
+        response = await get_response(prompt, self.questioner_llm)
         questions = parse_question_generation_response(response)
-        return {q: ["Yes", "No"] for q in questions[:n_questions]}
+        return {q: ["Yes", "No"] for q in questions[: self.n_questions]}
 
     @override
     async def get_likelihoods(
-        self, curr: QuestionNode, llm: LLM
+        self, question: str, possible_answers: list[str]
     ) -> dict[str, dict[str, float]]:
-        prompt = build_likelihood_prompt(curr.question, self.entities)
+        prompt = build_likelihood_prompt(question, self.hypothesis_space)
 
-        response = await get_response(prompt, llm, self.get_id())
+        response = await get_response(prompt, self.questioner_llm)
         likelihoods = parse_likelihood_response(response)
         return {
             "Yes": {entity: p for entity, p in likelihoods.items()},
@@ -65,9 +44,9 @@ class TwentyQuestionsUoT(Task):
         }
 
     @override
-    async def get_answer(self, curr: QuestionNode, llm: LLM) -> str:
-        prompt = build_answer_prompt(self.secret_entity, curr.question)
-        response = await get_response(prompt, llm, self.get_id())
+    async def get_answer(self, question: str, possible_answers: list[str]) -> str:
+        prompt = build_answer_prompt(self.task_answer, question)
+        response = await get_response(prompt, self.answerer_llm)
         answer = parse_answer_response(response)
         return answer
 
