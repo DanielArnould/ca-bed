@@ -96,7 +96,7 @@ def build_likelihood_prompt(question: str, entities: list[str]) -> str:
             assuming it was the answer, how likely is it that the answerer would
             answer yes? First, provide a short explanation of your reasoning.
             Then provide the result strictly in the following format, including the double
-            hashtag.
+            hashtag. Do it for all entities, even if it's long.
 
             ##Apple##: <a single number between 0 and 1>
             ##Bee##: <a single number between 0 and 1>""").strip()
@@ -115,7 +115,7 @@ def build_answer_prompt(secret_entity: str, question: str) -> str:
         You are a player of the 20 Questions game. Your goal is
         to impersonate the secret entity, X. X is {secret_entity}. You have just
         been asked, '{question}'. Answer truthfully based on what X is, then
-        provide the result strictly in the format, including the double hashtag:
+        provide a short explanation and the result strictly in the format, including the double hashtag:
 
         ##Answer##: <'Yes' or 'No'>
     """).strip()

@@ -15,7 +15,7 @@ from ca_bed.node import (
 from ca_bed.tasks.task import TreeBasedTask
 
 
-async def run_task(
+async def run_tree_based_task(
     task: TreeBasedTask,
 ) -> RunRecord:
     initial_belief_state = task.create_uniform_belief_state()
@@ -47,7 +47,7 @@ async def run_task(
                 child for child in best_question_node.children if child.answer == answer
             )
     except Exception:
-        logger.bind(task_id=task.get_id()).exception("An error in the method occurred")
+        logger.exception("A fatal error in the method occurred")
 
     final_path.append(current_node)
     return RunRecord(task=task, final_path=final_path)
@@ -127,6 +127,9 @@ def calculate_posterior(
     prior: ProbabilityDistribution,
     likelihoods: Likelihoods,
 ) -> tuple[ProbabilityDistribution, float]:
+    for h in prior:
+        if h not in likelihoods:
+            logger.warning(f"{h} not found in likelihoods!")
     unnormalized = {h: p * likelihoods.get(h, 0.0) for h, p in prior.items()}
     marginal = sum(unnormalized.values())
     normalized_posteriors = {}
@@ -139,8 +142,10 @@ def calculate_posterior(
 def is_terminal(
     node: EvidenceNode, max_conversation_depth: int, confidence_threshold: float
 ) -> bool:
-    return get_conversation_depth(node) >= max_conversation_depth or any(
-        prob >= confidence_threshold for prob in node.belief_state.values()
+    return (
+        get_conversation_depth(node) >= max_conversation_depth
+        or any(prob >= confidence_threshold for prob in node.belief_state.values())
+        or sum(node.belief_state.values()) == 0
     )
 
 

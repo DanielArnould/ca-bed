@@ -125,7 +125,7 @@ def parse_question_generation_response(response: str) -> list[tuple[str, list[st
         if q_match:
             # Save the previous question block before starting a new one
             if current_question and current_letters:
-                full_context = current_question + "\n".join(current_options_text)
+                full_context = current_question + "\n" + "\n".join(current_options_text)
                 questions.append((full_context, current_letters))
 
             current_question = q_match.group(1).strip()
@@ -145,7 +145,7 @@ def parse_question_generation_response(response: str) -> list[tuple[str, list[st
 
     # Save the final question block in the loop
     if current_question and current_letters:
-        full_context = current_question + "\n".join(current_options_text)
+        full_context = current_question + "\n" + "\n".join(current_options_text)
         questions.append((full_context, current_letters))
 
     return questions
@@ -169,7 +169,8 @@ def build_likelihood_prompt(
             
             First, provide a short explanation of your reasoning.
             Then provide the result strictly in the following format, including the double hashtag 
-            with the Entity and the Letter separated by a pipe (|):
+            with the Entity and the Letter separated by a pipe (|).
+            Do it for all entities, even if it's long:
 
             ##Entity|Letter##: <a single number between 0 and 1>
             

@@ -8,7 +8,7 @@ from ca_bed.node import (
 from ca_bed.tasks.task import DirectTask, Prediction, Question
 
 
-async def run_task(task: DirectTask) -> RunRecord:
+async def run_direct_task(task: DirectTask) -> RunRecord:
     """
     The direct prompting method fits into the same evaluation framework as the
     normal method. We achieve this as follows:

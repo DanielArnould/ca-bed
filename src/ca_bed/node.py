@@ -36,10 +36,7 @@ class QuestionAnswer:
 
 
 def get_conversation_depth(node: EvidenceNode) -> int:
-    if node.parent is None:
-        return 0
-
-    return 1 + get_conversation_depth(node.parent.parent)
+    return len(get_conversation_history(node))
 
 
 def get_conversation_history(node: EvidenceNode) -> list[QuestionAnswer]:
