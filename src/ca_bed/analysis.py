@@ -34,8 +34,8 @@ def get_run_eval(run_record: RunRecord) -> RunEval:
     top3_guesses = guesses[:3]
     top1_guesses = guesses[:1]
 
-    top1 = run_record.task.get_expected_answer() in top1_guesses
-    top3 = run_record.task.get_expected_answer() in top3_guesses
+    top1 = run_record.task.get_task_answer() in top1_guesses
+    top3 = run_record.task.get_task_answer() in top3_guesses
 
     return {"top1": top1, "top3": top3, "conversation_length": conversation_length}
 
