@@ -102,6 +102,8 @@ async def expand_questions(
             posterior, marginal = calculate_posterior(
                 current_node.parent.belief_state,
                 likelihoods,
+                task,
+                len(current_node.possible_answers),
             )
             evidence_node = EvidenceNode(
                 answer=answer,
@@ -126,15 +128,30 @@ async def expand_questions(
 def calculate_posterior(
     prior: ProbabilityDistribution,
     likelihoods: Likelihoods,
+    task: TreeBasedTask,
+    num_answers: int,
 ) -> tuple[ProbabilityDistribution, float]:
-    for h in prior:
+    unnormalized = {}
+
+    for h, prior_prob in prior.items():
         if h not in likelihoods:
             logger.warning(f"{h} not found in likelihoods!")
-    unnormalized = {h: p * likelihoods.get(h, 0.0) for h, p in prior.items()}
+
+        raw_likelihood = likelihoods.get(h, 1.0 / num_answers)
+
+        tuned_likelihood = (raw_likelihood * task.estimator_confidence) + (
+            (1.0 - task.estimator_confidence) * (1.0 / num_answers)
+        )
+
+        unnormalized[h] = prior_prob * tuned_likelihood
+
     marginal = sum(unnormalized.values())
-    normalized_posteriors = {}
+
     if marginal > 0:
         normalized_posteriors = {h: p / marginal for h, p in unnormalized.items()}
+    else:
+        # Fallback just in case estimator_confidence is exactly 1.0 and all likelihoods are 0
+        normalized_posteriors = prior.copy()
 
     return normalized_posteriors, marginal
 
