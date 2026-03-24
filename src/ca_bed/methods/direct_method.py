@@ -1,3 +1,5 @@
+from loguru import logger
+
 from ca_bed.history import RunRecord
 from ca_bed.node import (
     EvidenceNode,
@@ -35,48 +37,54 @@ async def run_direct_task(task: DirectTask) -> RunRecord:
     final_path: list[EvidenceNode] = []
     current_node: EvidenceNode = root
 
-    while not is_terminal(current_node, task):
-        response = await task.query_questioner(get_conversation_history(current_node))
+    try:
+        while not is_terminal(current_node, task):
+            response = await task.query_questioner(
+                get_conversation_history(current_node)
+            )
 
-        match response:
-            case Prediction(prediction):
-                question_node = QuestionNode(
-                    f"Is it {prediction}?",
-                    possible_answers=["Yes", "No"],
-                    parent=current_node,
-                )
-                current_node.children.append(question_node)
+            match response:
+                case Prediction(prediction):
+                    question_node = QuestionNode(
+                        f"Is it {prediction}?",
+                        possible_answers=["Yes", "No"],
+                        parent=current_node,
+                    )
+                    current_node.children.append(question_node)
 
-                prediction_count += 1
-                updated_belief_state = calculate_posterior(
-                    current_node.belief_state, prediction, prediction_count
-                )
+                    prediction_count += 1
+                    updated_belief_state = calculate_posterior(
+                        current_node.belief_state, prediction, prediction_count
+                    )
 
-                evidence_answer = (
-                    "Yes"
-                    if prediction.strip().lower() == task.task_answer.strip().lower()
-                    else "No"
-                )
+                    evidence_answer = (
+                        "Yes"
+                        if prediction.strip().lower()
+                        == task.task_answer.strip().lower()
+                        else "No"
+                    )
 
-            case Question(question):
-                question_node = QuestionNode(
-                    question, possible_answers=[], parent=current_node
-                )
+                case Question(question):
+                    question_node = QuestionNode(
+                        question, possible_answers=[], parent=current_node
+                    )
 
-                raw_answer = await task.query_answerer(question)
-                evidence_answer = raw_answer.strip()
+                    raw_answer = await task.query_answerer(question)
+                    evidence_answer = raw_answer.strip()
 
-                updated_belief_state = current_node.belief_state.copy()
+                    updated_belief_state = current_node.belief_state.copy()
 
-        evidence_node = EvidenceNode(
-            answer=evidence_answer,
-            belief_state=updated_belief_state,
-            marginal_likelihood=1.0,
-            parent=question_node,
-        )
-        question_node.children.append(evidence_node)
-        current_node = evidence_node
-        final_path.append(evidence_node)
+            evidence_node = EvidenceNode(
+                answer=evidence_answer,
+                belief_state=updated_belief_state,
+                marginal_likelihood=1.0,
+                parent=question_node,
+            )
+            question_node.children.append(evidence_node)
+            current_node = evidence_node
+            final_path.append(evidence_node)
+    except Exception:
+        logger.exception("A fatal error in the method occurred")
 
     return RunRecord(task=task, final_path=final_path)
 
