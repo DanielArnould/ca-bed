@@ -19,7 +19,7 @@ class SuspectInformation(TypedDict):
     suspicion: str
     motive: str
     opportunity: str
-    evidence: str
+    story: str
     testimony: str
     is_murderer: bool
 

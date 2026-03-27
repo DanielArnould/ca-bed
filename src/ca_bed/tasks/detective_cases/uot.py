@@ -39,8 +39,7 @@ class DetectiveCasesUoT(TreeBasedTask):
 
     @override
     def get_id(self) -> str:
-        # Changed to reflect the UoT method
-        return f"detective_cases_uot_{self.case.get('num', 'unknown')}"
+        return f"detective_cases_uot_{self.case['num']}"
 
     @override
     async def create_questions(
@@ -83,7 +82,7 @@ class DetectiveCasesUoT(TreeBasedTask):
             (
                 s
                 for s in self.case["suspects"]
-                if s["name"].lower() == target_name.lower()
+                if s["name"].lower() in target_name.lower()
             ),
             None,
         )
@@ -106,8 +105,12 @@ def build_case_context(case: DetectiveCasesInstance) -> str:
     ]
     for s in case["suspects"]:
         parts.append(
-            f"- {s['name']}: {s['introduction']} (Relationship: {s['relationship']}). "
-            f"Reason at scene: {s['reason_at_scene']}. Known evidence: {s['evidence']}"
+            f"- {s['name']}: {s['introduction']}. "
+            f"Reason at scene: {s['reason_at_scene']} "
+            f"Relationship to victim: {s['relationship']} "
+            f"Motive: {s['motive']} "
+            f"Opportunity: {s['opportunity']} "
+            f"Testimony: {s['testimony']}"
         )
     return "\n".join(parts)
 
@@ -150,7 +153,7 @@ def build_question_generation_prompt(
 
 
 def parse_question_generation_response(response: str) -> list[str]:
-    question_generation_regex = r"##Question##[^:]*:\s*(\[Target:.*?\]\s*.*?\?)"
+    question_generation_regex = r"##Question##[^:]*:[^\[]*(\[Target:.*?\]\s*.*?\?)"
     return re.findall(question_generation_regex, response)
 
 
@@ -182,7 +185,6 @@ def build_likelihood_prompt(
 
 
 def parse_likelihood_response(response: str) -> dict[str, float]:
-    # UoT modification: Strictly matching Yes/No and converting to 1.0 or 0.0
     likelihood_regex = r"##(.*?)##[^:]*:\s*(Yes|No)"
     return {
         key.strip(): 1.0 if answer.capitalize() == "Yes" else 0.0
@@ -195,13 +197,17 @@ def build_answer_prompt(
     target_suspect: SuspectInformation,
     question: str,
 ) -> str:
+    # Strip the [Target: Name] prefix so the answerer just sees the raw question
     clean_question = re.sub(r"\[Target:\s*.*?\]\s*", "", question)
+
     is_murder = target_suspect["is_murderer"]
     role_instruction = (
         "You are the MURDERER. You must lie if necessary to avoid getting caught, but try to sound consistent with your alibi."
         if is_murder
         else "You are INNOCENT. You should tell the truth based on your knowledge and relationship to the victim."
     )
+
+    # Generate the full case context
     context = build_case_context(case)
 
     return dedent(f"""\
@@ -212,10 +218,7 @@ def build_answer_prompt(
         
         ### Your Profile ###
         Name: {target_suspect["name"]}
-        Relationship to victim: {target_suspect["relationship"]}
-        Motive: {target_suspect["motive"]}
-        Opportunity: {target_suspect["opportunity"]}
-        What you told the police: {target_suspect["testimony"]}
+        Story: {target_suspect["story"]}
         
         ### Your Secret Reality ###
         {role_instruction}

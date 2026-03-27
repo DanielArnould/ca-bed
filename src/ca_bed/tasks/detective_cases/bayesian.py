@@ -84,7 +84,7 @@ class DetectiveCasesBayesian(TreeBasedTask):
             (
                 s
                 for s in self.case["suspects"]
-                if s["name"].lower() == target_name.lower()
+                if s["name"].lower() in target_name.lower()
             ),
             None,
         )
@@ -107,8 +107,12 @@ def build_case_context(case: DetectiveCasesInstance) -> str:
     ]
     for s in case["suspects"]:
         parts.append(
-            f"- {s['name']}: {s['introduction']} (Relationship: {s['relationship']}). "
-            f"Reason at scene: {s['reason_at_scene']}. Known evidence: {s['evidence']}"
+            f"- {s['name']}: {s['introduction']}. "
+            f"Reason at scene: {s['reason_at_scene']} "
+            f"Relationship to victim: {s['relationship']} "
+            f"Motive: {s['motive']} "
+            f"Opportunity: {s['opportunity']} "
+            f"Testimony: {s['testimony']}"
         )
     return "\n".join(parts)
 
@@ -151,7 +155,7 @@ def build_question_generation_prompt(
 
 
 def parse_question_generation_response(response: str) -> list[str]:
-    question_generation_regex = r"##Question##[^:]*:\s*(\[Target:.*?\]\s*.*?\?)"
+    question_generation_regex = r"##Question##[^:]*:[^\[]*(\[Target:.*?\]\s*.*?\?)"
     return re.findall(question_generation_regex, response)
 
 
@@ -216,10 +220,7 @@ def build_answer_prompt(
         
         ### Your Profile ###
         Name: {target_suspect["name"]}
-        Relationship to victim: {target_suspect["relationship"]}
-        Motive: {target_suspect["motive"]}
-        Opportunity: {target_suspect["opportunity"]}
-        What you told the police: {target_suspect["testimony"]}
+        Story: {target_suspect["story"]}
         
         ### Your Secret Reality ###
         {role_instruction}
