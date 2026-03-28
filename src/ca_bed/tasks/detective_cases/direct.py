@@ -4,6 +4,7 @@ from typing import override
 
 from ca_bed.llm import LLM, get_response
 from ca_bed.node import QuestionAnswer
+from ca_bed.tasks.detective_cases.common import build_case_context
 from ca_bed.tasks.detective_cases.data import DetectiveCasesInstance, SuspectInformation
 from ca_bed.tasks.task import DirectTask, Prediction, Question
 
@@ -74,25 +75,6 @@ class DetectiveCasesDirect(DirectTask):
         return parse_answerer_response(response)
 
 
-def build_case_context(case: DetectiveCasesInstance) -> str:
-    parts = [
-        f"Time: {case['time']}",
-        f"Location: {case['location']}",
-        f"Victim: {case['victim']['name']} - {case['victim']['introduction']} (Cause of death: {case['victim']['cause_of_death']}, Weapon: {case['victim']['murder_weapon']})",
-        "\nSuspects:",
-    ]
-    for s in case["suspects"]:
-        parts.append(
-            f"- {s['name']}: {s['introduction']}. "
-            f"Reason at scene: {s['reason_at_scene']} "
-            f"Relationship to victim: {s['relationship']} "
-            f"Motive: {s['motive']} "
-            f"Opportunity: {s['opportunity']} "
-            f"Testimony: {s['testimony']}"
-        )
-    return "\n".join(parts)
-
-
 def build_questioner_prompt(
     case: DetectiveCasesInstance,
     conversation_history: list[QuestionAnswer],
@@ -128,7 +110,7 @@ def build_questioner_prompt(
 
     prompt_parts.extend(
         [
-            "First, provide a short explanation for your reasoning. Then provide the result strictly in one of the following formats, including the double hashtag:",
+            "First, provide a short explanation of your reasoning. Provide the result strictly in one of the following formats, including the double hashtag:",
             "",
             "If asking a question, you MUST specify WHICH suspect you are asking:",
             "##Question##: [Target: <Suspect Name>] <Your yes/no question here>",

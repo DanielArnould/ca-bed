@@ -11,17 +11,11 @@ from asyncio import Semaphore
 
 from ca_bed.llm import LLM
 
-from ca_bed.methods.direct_method import run_direct_task
 from ca_bed.methods.tree_based_method import run_tree_based_task
-from ca_bed.tasks.detective_cases.bayesian import DetectiveCasesBayesian
-from ca_bed.tasks.detective_cases.bayesian_multi import (
-    DetectiveCasesBayesianMultibranching,
-)
-from ca_bed.tasks.detective_cases.data import load_all_data
-from ca_bed.tasks.detective_cases.direct import DetectiveCasesDirect
-from ca_bed.tasks.detective_cases.uot import DetectiveCasesUoT
 from ca_bed.tasks.task import Task
 from ca_bed.history import RunRecord
+from ca_bed.tasks.twenty_questions.bayesian import TwentyQuestionsBayesian
+from ca_bed.tasks.twenty_questions.data import TWENTY_QUESTIONS_ENTITIES
 
 
 async def run_and_save_task(
@@ -53,7 +47,7 @@ async def run_and_save_task(
 
 async def main() -> None:
     start = time.perf_counter()
-    experiment_name = "testy"
+    experiment_name = "scaling_ablation_twenty_questions"
     results_dir = Path(f"results/{experiment_name}/")
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,106 +56,52 @@ async def main() -> None:
 
     # --- Hyperparameters ---
     random.seed(42)
-    n_questions = 3
-    max_conversation_depth = 10
-    max_lookahead_depth = 2
-    confidence_threshold = 1.0
-    estimator_confidence = 1.0
-    max_concurrent_tasks = 30
-    sample_size = 30
+    max_conversation_depth = 20
+    max_concurrent_tasks = 40
+    sample_size = 20
 
-    dataset = load_all_data()
-    sample = dataset[10:50]
+    confidence_threshold = 0.8
+    estimator_confidence = 0.7
 
-    # List of tuples: (Method Name, Task Instance, Runner Function)
+    dataset = TWENTY_QUESTIONS_ENTITIES
+    sampled_dataset = random.sample(dataset, len(dataset))[:sample_size]
+
     tasks_to_run = []
 
-    for case in sample:
-        tasks_to_run.append(
-            (
-                "UoT_D2_0.7_0.8",
-                DetectiveCasesUoT(
-                    questioner_llm=questioner_llm,
-                    answerer_llm=answerer_llm,
-                    case=case,
-                    max_conversation_depth=max_conversation_depth,
-                    n_questions=n_questions,
-                    max_lookahead_depth=max_lookahead_depth,
-                    confidence_threshold=0.8,
-                    estimator_confidence=0.7,
-                ),
-                run_tree_based_task,
-            )
-        )
+    # --- 1D Sweep Configurations ---
+    # Format: (Width, Depth, Method Label)
+    ablation_configs = [
+        # 2. The Depth Sweep (Holding Width at 3)
+        (3, 1, "DepthSweep_W3_D1"),
+        (3, 2, "Baseline_W3_D2"),
+        (3, 3, "DepthSweep_W3_D3"),
+        (3, 3, "DepthSweep_W3_D4"),
+        # 3. The Width Sweep (Holding Depth at 2)
+        (2, 2, "WidthSweep_W2_D2"),
+        (5, 2, "WidthSweep_W5_D2"),
+    ]
 
-        tasks_to_run.append(
-            (
-                "UoT_D2_1.0_1.0",
-                DetectiveCasesUoT(
-                    questioner_llm=questioner_llm,
-                    answerer_llm=answerer_llm,
-                    case=case,
-                    max_conversation_depth=max_conversation_depth,
-                    n_questions=n_questions,
-                    max_lookahead_depth=max_lookahead_depth,
-                    confidence_threshold=1.0,
-                    estimator_confidence=1.0,
-                ),
-                run_tree_based_task,
+    for width, depth, method_name in ablation_configs:
+        for entity in sampled_dataset:
+            tasks_to_run.append(
+                (
+                    method_name,
+                    TwentyQuestionsBayesian(
+                        questioner_llm=questioner_llm,
+                        answerer_llm=answerer_llm,
+                        task_answer=entity,
+                        hypothesis_space=dataset,
+                        max_conversation_depth=max_conversation_depth,
+                        n_questions=width,
+                        max_lookahead_depth=depth,
+                        confidence_threshold=confidence_threshold,
+                        estimator_confidence=estimator_confidence,
+                    ),
+                    run_tree_based_task,
+                )
             )
-        )
 
-        tasks_to_run.append(
-            (
-                "UoT_D2_1.0_0.8",
-                DetectiveCasesUoT(
-                    questioner_llm=questioner_llm,
-                    answerer_llm=answerer_llm,
-                    case=case,
-                    max_conversation_depth=max_conversation_depth,
-                    n_questions=n_questions,
-                    max_lookahead_depth=max_lookahead_depth,
-                    confidence_threshold=0.8,
-                    estimator_confidence=1.0,
-                ),
-                run_tree_based_task,
-            )
-        )
-
-        tasks_to_run.append(
-            (
-                "UoT_D2_0.7_1.0",
-                DetectiveCasesUoT(
-                    questioner_llm=questioner_llm,
-                    answerer_llm=answerer_llm,
-                    case=case,
-                    max_conversation_depth=max_conversation_depth,
-                    n_questions=n_questions,
-                    max_lookahead_depth=max_lookahead_depth,
-                    confidence_threshold=1.0,
-                    estimator_confidence=0.7,
-                ),
-                run_tree_based_task,
-            )
-        )
-
-        tasks_to_run.append(
-            (
-                "BayesianD2",
-                DetectiveCasesBayesian(
-                    questioner_llm=questioner_llm,
-                    answerer_llm=answerer_llm,
-                    case=case,
-                    max_conversation_depth=max_conversation_depth,
-                    n_questions=n_questions,
-                    max_lookahead_depth=max_lookahead_depth,
-                    confidence_threshold=0.8,
-                    estimator_confidence=0.7,
-                ),
-                run_tree_based_task,
-            )
-        )
-
+    print(f"Total tasks queued: {len(tasks_to_run)}")
     semaphore = Semaphore(max_concurrent_tasks)
 
     await tqdm.gather(
@@ -178,7 +118,7 @@ async def main() -> None:
     )
 
     duration = time.perf_counter() - start
-    print(f"Completed in {duration}s")
+    print(f"Completed in {duration:.2f}s")
 
 
 if __name__ == "__main__":

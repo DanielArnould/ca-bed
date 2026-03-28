@@ -4,6 +4,7 @@ from typing import override
 
 from ca_bed.llm import LLM, get_response
 from ca_bed.node import QuestionAnswer
+from ca_bed.tasks.detective_cases.common import build_case_context
 from ca_bed.tasks.detective_cases.data import DetectiveCasesInstance, SuspectInformation
 from ca_bed.tasks.task import TreeBasedTask
 
@@ -96,25 +97,6 @@ class DetectiveCasesBayesian(TreeBasedTask):
         response = await get_response(prompt, self.answerer_llm)
         answer = parse_answer_response(response)
         return answer
-
-
-def build_case_context(case: DetectiveCasesInstance) -> str:
-    parts = [
-        f"Time: {case['time']}",
-        f"Location: {case['location']}",
-        f"Victim: {case['victim']['name']} - {case['victim']['introduction']} (Cause of death: {case['victim']['cause_of_death']}, Weapon: {case['victim']['murder_weapon']})",
-        "\nSuspects:",
-    ]
-    for s in case["suspects"]:
-        parts.append(
-            f"- {s['name']}: {s['introduction']}. "
-            f"Reason at scene: {s['reason_at_scene']} "
-            f"Relationship to victim: {s['relationship']} "
-            f"Motive: {s['motive']} "
-            f"Opportunity: {s['opportunity']} "
-            f"Testimony: {s['testimony']}"
-        )
-    return "\n".join(parts)
 
 
 def build_question_generation_prompt(
