@@ -32,7 +32,7 @@ class DetectiveCasesDirect(DirectTask):
 
     @override
     def get_id(self) -> str:
-        return f"detective_cases_direct_{self.case.get('num', 'unknown')}"
+        return f"detective_cases_direct_{self.case['num']}"
 
     @override
     async def query_questioner(
@@ -74,9 +74,6 @@ class DetectiveCasesDirect(DirectTask):
         return parse_answerer_response(response)
 
 
-# --- Helper Functions ---
-
-
 def build_case_context(case: DetectiveCasesInstance) -> str:
     parts = [
         f"Time: {case['time']}",
@@ -86,8 +83,12 @@ def build_case_context(case: DetectiveCasesInstance) -> str:
     ]
     for s in case["suspects"]:
         parts.append(
-            f"- {s['name']}: {s['introduction']} (Relationship: {s['relationship']}). "
-            f"Reason at scene: {s['reason_at_scene']}. Known evidence: {s['evidence']}"
+            f"- {s['name']}: {s['introduction']}. "
+            f"Reason at scene: {s['reason_at_scene']} "
+            f"Relationship to victim: {s['relationship']} "
+            f"Motive: {s['motive']} "
+            f"Opportunity: {s['opportunity']} "
+            f"Testimony: {s['testimony']}"
         )
     return "\n".join(parts)
 
@@ -141,7 +142,7 @@ def build_questioner_prompt(
 
 
 def parse_questioner_response(response: str) -> Question | Prediction:
-    question_regex = r"##Question##[^#]*:\s*(.*)"
+    question_regex = r"##Question##[^:]*:[^\[]*(\[Target:.*?\]\s*.*?\?)"
     prediction_regex = r"##Prediction##[^#]*:\s*(.*)"
 
     question_match = re.search(question_regex, response, re.IGNORECASE)

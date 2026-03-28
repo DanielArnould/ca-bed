@@ -110,7 +110,7 @@ class DetectiveCasesBayesianMultibranching(TreeBasedTask):
             (
                 s
                 for s in self.case["suspects"]
-                if s["name"].lower() == target_name.lower()
+                if s["name"].lower() in target_name.lower()
             ),
             None,
         )
@@ -140,8 +140,12 @@ def build_case_context(case: DetectiveCasesInstance) -> str:
     ]
     for s in case["suspects"]:
         parts.append(
-            f"- {s['name']}: {s['introduction']} (Relationship: {s['relationship']}). "
-            f"Reason at scene: {s['reason_at_scene']}. Known evidence: {s['evidence']}"
+            f"- {s['name']}: {s['introduction']}. "
+            f"Reason at scene: {s['reason_at_scene']} "
+            f"Relationship to victim: {s['relationship']} "
+            f"Motive: {s['motive']} "
+            f"Opportunity: {s['opportunity']} "
+            f"Testimony: {s['testimony']}"
         )
     return "\n".join(parts)
 
@@ -199,7 +203,9 @@ def parse_question_generation_response(response: str) -> list[tuple[str, list[st
         line = line.strip()
 
         # 1. Match Question
-        q_match = re.match(r"##Question##[^:]*:\s*(.*)", line, re.IGNORECASE)
+        q_match = re.match(
+            r"##Question##[^:]*:[^\[]*(\[Target:.*?\]\s*.*?\?)", line, re.IGNORECASE
+        )
         if q_match:
             # Save the previous question block before starting a new one
             if current_question and current_letters:
