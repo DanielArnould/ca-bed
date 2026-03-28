@@ -13,14 +13,14 @@ from ca_bed.llm import LLM
 
 from ca_bed.methods.direct_method import run_direct_task
 from ca_bed.methods.tree_based_method import run_tree_based_task
-from ca_bed.tasks.task import Task
-from ca_bed.tasks.twenty_questions.bayesian import TwentyQuestionsBayesian
-from ca_bed.tasks.twenty_questions.bayesian_multibranching import (
-    TwentyQuestionsBayesianMultibranching,
+from ca_bed.tasks.detective_cases.bayesian import DetectiveCasesBayesian
+from ca_bed.tasks.detective_cases.bayesian_multi import (
+    DetectiveCasesBayesianMultibranching,
 )
-from ca_bed.tasks.twenty_questions.uot import TwentyQuestionsUoT
-from ca_bed.tasks.twenty_questions.direct import TwentyQuestionsDirect
-from ca_bed.tasks.twenty_questions.data import TWENTY_QUESTIONS_ENTITIES
+from ca_bed.tasks.detective_cases.data import load_all_data
+from ca_bed.tasks.detective_cases.direct import DetectiveCasesDirect
+from ca_bed.tasks.detective_cases.uot import DetectiveCasesUoT
+from ca_bed.tasks.task import Task
 from ca_bed.history import RunRecord
 
 
@@ -53,7 +53,7 @@ async def run_and_save_task(
 
 async def main() -> None:
     start = time.perf_counter()
-    experiment_name = "test5"
+    experiment_name = "testy"
     results_dir = Path(f"results/{experiment_name}/")
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,132 +63,107 @@ async def main() -> None:
     # --- Hyperparameters ---
     random.seed(42)
     n_questions = 3
-    max_conversation_depth = 20
-    # max_lookahead_depth = 1
-    confidence_threshold = 0.9
-    estimator_confidence = 0.9  # IGNORED
+    max_conversation_depth = 10
+    max_lookahead_depth = 2
+    confidence_threshold = 1.0
+    estimator_confidence = 1.0
     max_concurrent_tasks = 30
-    sample_size = 1
+    sample_size = 30
 
-    hypothesis_space = TWENTY_QUESTIONS_ENTITIES
-    evaluation_set = random.sample(hypothesis_space, len(hypothesis_space))[
-        :sample_size
-    ]
+    dataset = load_all_data()
+    sample = dataset[10:50]
 
     # List of tuples: (Method Name, Task Instance, Runner Function)
     tasks_to_run = []
 
-    for secret_entity in evaluation_set:
-        # tasks_to_run.append(
-        #     (
-        #         "BayesianD1",
-        #         TwentyQuestionsBayesian(
-        #             questioner_llm=questioner_llm,
-        #             answerer_llm=answerer_llm,
-        #             task_answer=secret_entity,
-        #             hypothesis_space=hypothesis_space,
-        #             max_conversation_depth=max_conversation_depth,
-        #             n_questions=n_questions,
-        #             max_lookahead_depth=1,
-        #             confidence_threshold=confidence_threshold,
-        #             estimator_confidence=estimator_confidence,
-        #         ),
-        #         run_tree_based_task,
-        #     )
-        # )
-
+    for case in sample:
         tasks_to_run.append(
             (
-                "BayesianD2",
-                TwentyQuestionsBayesian(
+                "UoT_D2_0.7_0.8",
+                DetectiveCasesUoT(
                     questioner_llm=questioner_llm,
                     answerer_llm=answerer_llm,
-                    task_answer=secret_entity,
-                    hypothesis_space=hypothesis_space,
+                    case=case,
                     max_conversation_depth=max_conversation_depth,
                     n_questions=n_questions,
-                    max_lookahead_depth=2,
-                    confidence_threshold=confidence_threshold,
-                    estimator_confidence=estimator_confidence,
+                    max_lookahead_depth=max_lookahead_depth,
+                    confidence_threshold=0.8,
+                    estimator_confidence=0.7,
                 ),
                 run_tree_based_task,
             )
         )
 
-        # tasks_to_run.append(
-        #     (
-        #         "BayesianD3",
-        #         TwentyQuestionsBayesian(
-        #             questioner_llm=questioner_llm,
-        #             answerer_llm=answerer_llm,
-        #             task_answer=secret_entity,
-        #             hypothesis_space=hypothesis_space,
-        #             max_conversation_depth=max_conversation_depth,
-        #             n_questions=n_questions,
-        #             max_lookahead_depth=3,
-        #             confidence_threshold=confidence_threshold,
-        #             estimator_confidence=estimator_confidence,
-        #         ),
-        #         run_tree_based_task,
-        #     )
-        # )
+        tasks_to_run.append(
+            (
+                "UoT_D2_1.0_1.0",
+                DetectiveCasesUoT(
+                    questioner_llm=questioner_llm,
+                    answerer_llm=answerer_llm,
+                    case=case,
+                    max_conversation_depth=max_conversation_depth,
+                    n_questions=n_questions,
+                    max_lookahead_depth=max_lookahead_depth,
+                    confidence_threshold=1.0,
+                    estimator_confidence=1.0,
+                ),
+                run_tree_based_task,
+            )
+        )
 
-        # # 2. Bayesian Multibranching (Multiple Choice)
-        # tasks_to_run.append(
-        #     (
-        #         "BayesianMulti",
-        #         TwentyQuestionsBayesianMultibranching(
-        #             questioner_llm=questioner_llm,
-        #             answerer_llm=answerer_llm,
-        #             task_answer=secret_entity,
-        #             hypothesis_space=hypothesis_space,
-        #             max_conversation_depth=max_conversation_depth,
-        #             n_questions=n_questions,
-        #             max_lookahead_depth=max_lookahead_depth,
-        #             confidence_threshold=confidence_threshold,
-        #             estimator_confidence=estimator_confidence,
-        #         ),
-        #         run_tree_based_task,
-        #     )
-        # )
+        tasks_to_run.append(
+            (
+                "UoT_D2_1.0_0.8",
+                DetectiveCasesUoT(
+                    questioner_llm=questioner_llm,
+                    answerer_llm=answerer_llm,
+                    case=case,
+                    max_conversation_depth=max_conversation_depth,
+                    n_questions=n_questions,
+                    max_lookahead_depth=max_lookahead_depth,
+                    confidence_threshold=0.8,
+                    estimator_confidence=1.0,
+                ),
+                run_tree_based_task,
+            )
+        )
 
-        # # 3. Uncertainty of Thought (UoT)
-        # tasks_to_run.append(
-        #     (
-        #         "UoT",
-        #         TwentyQuestionsUoT(
-        #             questioner_llm=questioner_llm,
-        #             answerer_llm=answerer_llm,
-        #             task_answer=secret_entity,
-        #             hypothesis_space=hypothesis_space,
-        #             max_conversation_depth=max_conversation_depth,
-        #             n_questions=n_questions,
-        #             max_lookahead_depth=max_lookahead_depth,
-        #             confidence_threshold=confidence_threshold,
-        #             estimator_confidence=estimator_confidence,
-        #         ),
-        #         run_tree_based_task,
-        #     )
-        # )
+        tasks_to_run.append(
+            (
+                "UoT_D2_0.7_1.0",
+                DetectiveCasesUoT(
+                    questioner_llm=questioner_llm,
+                    answerer_llm=answerer_llm,
+                    case=case,
+                    max_conversation_depth=max_conversation_depth,
+                    n_questions=n_questions,
+                    max_lookahead_depth=max_lookahead_depth,
+                    confidence_threshold=1.0,
+                    estimator_confidence=0.7,
+                ),
+                run_tree_based_task,
+            )
+        )
 
-        # 4. Direct Prompting (Linear)
-        # tasks_to_run.append(
-        #     (
-        #         "Direct",
-        #         TwentyQuestionsDirect(
-        #             questioner_llm=questioner_llm,
-        #             answerer_llm=answerer_llm,
-        #             task_answer=secret_entity,
-        #             hypothesis_space=hypothesis_space,
-        #             max_conversation_depth=max_conversation_depth,
-        #         ),
-        #         run_direct_task,
-        #     )
-        # )
+        tasks_to_run.append(
+            (
+                "BayesianD2",
+                DetectiveCasesBayesian(
+                    questioner_llm=questioner_llm,
+                    answerer_llm=answerer_llm,
+                    case=case,
+                    max_conversation_depth=max_conversation_depth,
+                    n_questions=n_questions,
+                    max_lookahead_depth=max_lookahead_depth,
+                    confidence_threshold=0.8,
+                    estimator_confidence=0.7,
+                ),
+                run_tree_based_task,
+            )
+        )
 
     semaphore = Semaphore(max_concurrent_tasks)
 
-    # Execute all tasks concurrently
     await tqdm.gather(
         *[
             run_and_save_task(
@@ -200,7 +175,6 @@ async def main() -> None:
             )
             for method_name, task, runner_func in tasks_to_run
         ],
-        desc=f"Running {len(tasks_to_run)} total tasks",
     )
 
     duration = time.perf_counter() - start
