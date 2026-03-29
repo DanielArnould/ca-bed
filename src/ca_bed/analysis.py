@@ -181,8 +181,12 @@ def main() -> None:
         depth_sem = eval_data["conversation_length_sem"]
         depth_str = f"{depth:4.1f} (±{depth_sem:.2f})"
 
+        succ_depth = eval_data["mean_conversation_length_in_successful_cases"]
+        succ_sem = eval_data["conversation_length_success_sem"]
+        succ_depth_str = f"{succ_depth:4.1f} (±{succ_sem:.2f})"
+
         print(
-            f"{method:<18} | {eval_data['num_runs']:<4} | {t1_str:<22} | {t3_str:<22} | {depth_str:<18}"
+            f"{method:<18} | {eval_data['num_runs']:<4} | {t1_str:<22} | {t3_str:<22} | {depth_str:<18} | {succ_depth_str:<18}"
         )
 
     print("=" * 95 + "\n")
