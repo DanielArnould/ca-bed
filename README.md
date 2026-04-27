@@ -1,4 +1,4 @@
-# CA-BED [ICLR 2026]
+# CA-BED [ICLR 2026 Workshop]
 
 **CA-BED: Conversation-Aware Bayesian Experimental Design**
 
