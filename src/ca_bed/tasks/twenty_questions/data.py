@@ -117,4 +117,4 @@ Objects = [
     "Hollywood sign",
     "Tennis court",
 ]
-COMMON = Animals + Food + Objects + Places
+TWENTY_QUESTIONS_ENTITIES = Animals + Food + Objects + Places
