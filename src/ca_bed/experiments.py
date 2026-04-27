@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 from pathlib import Path
 import pickle
@@ -10,12 +11,23 @@ from tqdm.asyncio import tqdm
 from asyncio import Semaphore
 
 from ca_bed.llm import LLM
+from ca_bed.history import RunRecord
+from ca_bed.tasks.task import Task
 
 from ca_bed.methods.tree_based_method import run_tree_based_task
-from ca_bed.tasks.task import Task
-from ca_bed.history import RunRecord
-from ca_bed.tasks.twenty_questions.bayesian import TwentyQuestionsBayesian
+from ca_bed.methods.direct_method import run_direct_task
+
+from ca_bed.tasks.detective_cases.data import load_all_data as load_detective_data
+from ca_bed.tasks.detective_cases.uot import DetectiveCasesUoT
+from ca_bed.tasks.detective_cases.bayesian import DetectiveCasesBayesian
+from ca_bed.tasks.detective_cases.bayesian_multi import DetectiveCasesBayesianMultibranching
+from ca_bed.tasks.detective_cases.direct import DetectiveCasesDirect
+
 from ca_bed.tasks.twenty_questions.data import TWENTY_QUESTIONS_ENTITIES
+from ca_bed.tasks.twenty_questions.uot import TwentyQuestionsUoT
+from ca_bed.tasks.twenty_questions.bayesian import TwentyQuestionsBayesian
+from ca_bed.tasks.twenty_questions.bayesian_multibranching import TwentyQuestionsBayesianMultibranching
+from ca_bed.tasks.twenty_questions.direct import TwentyQuestionsDirect
 
 
 async def run_and_save_task(
@@ -45,65 +57,165 @@ async def run_and_save_task(
         logger.remove(handler_id)
 
 
-async def main() -> None:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="CA-BED Experiments")
+
+    # Experiment Info
+    parser.add_argument("--experiment_name", type=str, default=f"run_{int(time.time())}")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--task", type=str, required=True, choices=[
+        "detective_direct", "detective_uot", "detective_bayesian", "detective_bayesian_multi",
+        "twentyq_direct", "twentyq_uot", "twentyq_bayesian", "twentyq_bayesian_multi"
+    ])
+
+    # Common Settings
+    parser.add_argument("--questioner_model", default="deepseek-chat")
+    parser.add_argument("--answerer_model", default="deepseek-reasoner")
+    parser.add_argument("--start_idx", type=int, default=0)
+    parser.add_argument("--end_idx", type=int, default=10)
+    parser.add_argument("--max_conversation_depth", type=int, default=20)
+    parser.add_argument("--max_concurrent_tasks", type=int, default=6)
+
+    # Tree Method Settings
+    parser.add_argument("--max_question_nodes", type=int, default=3)
+    parser.add_argument("--max_lookahead_depth", type=int, default=2)
+    parser.add_argument("--confidence_threshold", type=float, default=0.8)
+    parser.add_argument("--estimator_confidence", type=float, default=0.7)
+
+    return parser.parse_args()
+
+
+def create_task_instance(task_name: str, item, args, questioner_llm: LLM, answerer_llm: LLM, dataset) -> Task:
+    # Detective Cases
+    if task_name == "detective_direct":
+        return DetectiveCasesDirect(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            instance=item,
+            max_conversation_depth=args.max_conversation_depth,
+        )
+    elif task_name == "detective_uot":
+        return DetectiveCasesUoT(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            instance=item,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+    elif task_name == "detective_bayesian":
+        return DetectiveCasesBayesian(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            instance=item,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+    elif task_name == "detective_bayesian_multi":
+        return DetectiveCasesBayesianMultibranching(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            instance=item,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+
+    # Twenty Questions
+    elif task_name == "twentyq_direct":
+        return TwentyQuestionsDirect(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            task_answer=item,
+            hypothesis_space=dataset,
+            max_conversation_depth=args.max_conversation_depth,
+        )
+    elif task_name == "twentyq_uot":
+        return TwentyQuestionsUoT(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            task_answer=item,
+            hypothesis_space=dataset,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+    elif task_name == "twentyq_bayesian":
+        return TwentyQuestionsBayesian(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            task_answer=item,
+            hypothesis_space=dataset,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+    elif task_name == "twentyq_bayesian_multi":
+        return TwentyQuestionsBayesianMultibranching(
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            task_answer=item,
+            hypothesis_space=dataset,
+            n_questions=args.max_question_nodes,
+            max_lookahead_depth=args.max_lookahead_depth,
+            max_conversation_depth=args.max_conversation_depth,
+            confidence_threshold=args.confidence_threshold,
+            estimator_confidence=args.estimator_confidence,
+        )
+    else:
+        raise ValueError(f"Unknown task: {task_name}")
+
+
+async def main(args: argparse.Namespace) -> None:
     start = time.perf_counter()
-    experiment_name = "scaling_ablation_twenty_questions"
-    results_dir = Path(f"results/{experiment_name}/")
+    results_dir = Path(f"results/{args.experiment_name}/")
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    questioner_llm = LLM(model="deepseek-chat")
-    answerer_llm = LLM(model="deepseek-chat")
+    questioner_llm = LLM(model=args.questioner_model)
+    answerer_llm = LLM(model=args.answerer_model)
 
-    # --- Hyperparameters ---
-    random.seed(42)
-    max_conversation_depth = 20
-    max_concurrent_tasks = 40
-    sample_size = 20
+    random.seed(args.seed)
 
-    confidence_threshold = 0.8
-    estimator_confidence = 0.7
+    if args.task.startswith("detective_"):
+        dataset = load_detective_data()
+    else:
+        dataset = TWENTY_QUESTIONS_ENTITIES
 
-    dataset = TWENTY_QUESTIONS_ENTITIES
-    sampled_dataset = random.sample(dataset, len(dataset))[:sample_size]
+    sampled_dataset = dataset[args.start_idx : args.end_idx]
 
     tasks_to_run = []
+    method_name = args.task
 
-    # --- 1D Sweep Configurations ---
-    # Format: (Width, Depth, Method Label)
-    ablation_configs = [
-        # 2. The Depth Sweep (Holding Width at 3)
-        (3, 1, "DepthSweep_W3_D1"),
-        (3, 2, "Baseline_W3_D2"),
-        (3, 3, "DepthSweep_W3_D3"),
-        (3, 3, "DepthSweep_W3_D4"),
-        # 3. The Width Sweep (Holding Depth at 2)
-        (2, 2, "WidthSweep_W2_D2"),
-        (5, 2, "WidthSweep_W5_D2"),
-    ]
+    # Queue generation
+    for item in sampled_dataset:
+        task_instance = create_task_instance(
+            task_name=method_name,
+            item=item,
+            args=args,
+            questioner_llm=questioner_llm,
+            answerer_llm=answerer_llm,
+            dataset=dataset
+        )
 
-    for width, depth, method_name in ablation_configs:
-        for entity in sampled_dataset:
-            tasks_to_run.append(
-                (
-                    method_name,
-                    TwentyQuestionsBayesian(
-                        questioner_llm=questioner_llm,
-                        answerer_llm=answerer_llm,
-                        task_answer=entity,
-                        hypothesis_space=dataset,
-                        max_conversation_depth=max_conversation_depth,
-                        n_questions=width,
-                        max_lookahead_depth=depth,
-                        confidence_threshold=confidence_threshold,
-                        estimator_confidence=estimator_confidence,
-                    ),
-                    run_tree_based_task,
-                )
-            )
+        # Delegate execution method based on task type
+        runner_func = run_direct_task if "direct" in method_name else run_tree_based_task
+        tasks_to_run.append((method_name, task_instance, runner_func))
 
     print(f"Total tasks queued: {len(tasks_to_run)}")
-    semaphore = Semaphore(max_concurrent_tasks)
+    semaphore = Semaphore(args.max_concurrent_tasks)
 
+    # Parallel Execution 
     await tqdm.gather(
         *[
             run_and_save_task(
@@ -122,4 +234,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    args = parse_args()
+    asyncio.run(main(args))

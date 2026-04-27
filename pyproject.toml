@@ -1,5 +1,4 @@
 [project]
-authors = [{ name = "Daniel", email = "darn0005@student.monash.edu" }]
 dependencies = []
 name = "ca-bed"
 requires-python = ">= 3.14"
@@ -11,7 +10,7 @@ requires = ["hatchling"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64"]
 
 [tool.pixi.pypi-dependencies]
 ca_bed = { path = ".", editable = true }
@@ -24,5 +23,4 @@ analysis = "python src/ca_bed/analysis.py"
 openai = ">=2.26.0,<3"
 python-dotenv = ">=1.2.2,<2"
 loguru = ">=0.7.3,<0.8"
-ipykernel = ">=7.2.0,<8"
 async-lru = ">=2.3.0,<3"
