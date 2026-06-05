@@ -2,7 +2,7 @@
 
 **CA-BED: Conversation-Aware Bayesian Experimental Design**
 
-[![arXiv](https://img.shields.io/badge/arXiv-1234.56789-b31b1b.svg)](https://arxiv.org/abs/2606.01182)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.01182-b31b1b.svg)](https://arxiv.org/abs/2606.01182)
 
 Large Language Models (LLMs) excel at static reasoning tasks, yet their perfor
 mance often degrades in interactive scenarios where information must be actively
